@@ -27,6 +27,8 @@ let pairingWindow: BrowserWindow | null = null;
 // Panel visibility state
 let isPanelVisible = false;
 let savedWindowBounds: OriginalBounds | null = null;
+let savedHeidiBounds: OriginalBounds | null = null;
+let savedEmrBounds: OriginalBounds | null = null;
 let hasPushedWindow = false;
 
 // Agent state
@@ -623,6 +625,247 @@ async function restoreFrontmostWindow(bounds: OriginalBounds): Promise<void> {
 }
 
 /**
+ * Push both Heidi and EMR windows to make room for panel when it opens
+ * Ensures both linked windows are properly resized to accommodate the panel
+ */
+async function pushLinkedWindows(panelWidth: number): Promise<{
+  heidiBounds: OriginalBounds | null;
+  emrBounds: OriginalBounds | null;
+}> {
+  if (process.platform !== "darwin" || !linkedEmrWindow) {
+    return { heidiBounds: null, emrBounds: null };
+  }
+
+  const { width: screenWidth } = screen.getPrimaryDisplay().workAreaSize;
+  const newWidth = screenWidth - panelWidth;
+  let heidiBounds: OriginalBounds | null = null;
+  let emrBounds: OriginalBounds | null = null;
+
+  try {
+    // Push Heidi window
+    const heidiScript = `
+      tell application "System Events"
+        repeat with proc in (every application process whose visible is true)
+          set procName to name of proc
+          if procName contains "Heidi" or procName contains "heidi" then
+            tell process procName
+              try
+                set windowList to every window
+                set windowCount to count of windowList
+                if windowCount > 0 then
+                  set win to item 1 of windowList
+                  set winSize to size of win
+                  set winPos to position of win
+                  set winWidth to item 1 of winSize
+                  set winHeight to item 2 of winSize
+                  set winX to item 1 of winPos
+                  set winY to item 2 of winPos
+                  
+                  if winWidth > ${panelWidth} then
+                    set position of win to {0, winY}
+                    set size of win to {${newWidth}, winHeight}
+                    return procName & "|" & winX & "|" & winY & "|" & winWidth & "|" & winHeight
+                  else
+                    return "skip|" & procName & "|too_small"
+                  end if
+                end if
+              end try
+            end tell
+          end if
+        end repeat
+        return "not_found|heidi"
+      end tell
+    `;
+
+    const heidiResult = await execAsync(`osascript -e '${heidiScript}'`);
+    const heidiParts = heidiResult.stdout.trim().split("|");
+    if (
+      heidiParts.length === 5 &&
+      !heidiParts[0].startsWith("skip") &&
+      !heidiParts[0].startsWith("not_found")
+    ) {
+      heidiBounds = {
+        appName: heidiParts[0],
+        x: parseInt(heidiParts[1], 10),
+        y: parseInt(heidiParts[2], 10),
+        width: parseInt(heidiParts[3], 10),
+        height: parseInt(heidiParts[4], 10),
+      };
+      console.log(`[MAIN] Pushed Heidi window: ${heidiBounds.appName}`);
+    }
+
+    // Push EMR window
+    const emrScript = `
+      tell application "System Events"
+        tell process "${linkedEmrWindow.appName}"
+          try
+            set windowList to every window
+            set windowCount to count of windowList
+            if windowCount > 0 then
+              repeat with win in windowList
+                try
+                  set winTitle to name of win
+                  if winTitle contains "${linkedEmrWindow.windowTitle}" or "${linkedEmrWindow.windowTitle}" contains winTitle then
+                    set winSize to size of win
+                    set winPos to position of win
+                    set winWidth to item 1 of winSize
+                    set winHeight to item 2 of winSize
+                    set winX to item 1 of winPos
+                    set winY to item 2 of winPos
+                    
+                    if winWidth > ${panelWidth} then
+                      set position of win to {0, winY}
+                      set size of win to {${newWidth}, winHeight}
+                      return "${linkedEmrWindow.appName}|" & winX & "|" & winY & "|" & winWidth & "|" & winHeight
+                    else
+                      return "skip|${linkedEmrWindow.appName}|too_small"
+                    end if
+                  end if
+                end try
+              end repeat
+              -- Fallback: push first window if title match fails
+              set win to item 1 of windowList
+              set winSize to size of win
+              set winPos to position of win
+              set winWidth to item 1 of winSize
+              set winHeight to item 2 of winSize
+              set winX to item 1 of winPos
+              set winY to item 2 of winPos
+              
+              if winWidth > ${panelWidth} then
+                set position of win to {0, winY}
+                set size of win to {${newWidth}, winHeight}
+                return "${linkedEmrWindow.appName}|" & winX & "|" & winY & "|" & winWidth & "|" & winHeight
+              else
+                return "skip|${linkedEmrWindow.appName}|too_small"
+              end if
+            end if
+          on error errMsg
+            return "error|${linkedEmrWindow.appName}|" & errMsg
+          end try
+        end tell
+        return "not_found|${linkedEmrWindow.appName}"
+      end tell
+    `;
+
+    const emrResult = await execAsync(`osascript -e '${emrScript}'`);
+    const emrParts = emrResult.stdout.trim().split("|");
+    if (
+      emrParts.length === 5 &&
+      !emrParts[0].startsWith("skip") &&
+      !emrParts[0].startsWith("not_found") &&
+      !emrParts[0].startsWith("error")
+    ) {
+      emrBounds = {
+        appName: emrParts[0],
+        x: parseInt(emrParts[1], 10),
+        y: parseInt(emrParts[2], 10),
+        width: parseInt(emrParts[3], 10),
+        height: parseInt(emrParts[4], 10),
+      };
+      console.log(`[MAIN] Pushed EMR window: ${emrBounds.appName}`);
+    }
+  } catch (error) {
+    console.error("[MAIN] Error pushing linked windows:", error);
+  }
+
+  return { heidiBounds, emrBounds };
+}
+
+/**
+ * Restore both Heidi and EMR windows to full width when panel closes
+ * Ensures both linked windows are properly resized regardless of which was pushed
+ */
+async function restoreLinkedWindows(): Promise<void> {
+  if (process.platform !== "darwin" || !linkedEmrWindow) {
+    return;
+  }
+
+  const { width: screenWidth } = screen.getPrimaryDisplay().workAreaSize;
+
+  try {
+    // Restore Heidi window to full width
+    const heidiScript = `
+      tell application "System Events"
+        repeat with proc in (every application process whose visible is true)
+          set procName to name of proc
+          if procName contains "Heidi" or procName contains "heidi" then
+            tell process procName
+              try
+                set windowList to every window
+                set windowCount to count of windowList
+                if windowCount > 0 then
+                  repeat with win in windowList
+                    try
+                      set winSize to size of win
+                      set winPos to position of win
+                      set winHeight to item 2 of winSize
+                      set winY to item 2 of winPos
+                      set position of win to {0, winY}
+                      set size of win to {${screenWidth}, winHeight}
+                    end try
+                  end repeat
+                  return "heidi|restored"
+                end if
+              end try
+            end tell
+          end if
+        end repeat
+        return "heidi|not_found"
+      end tell
+    `;
+
+    const heidiResult = await execAsync(`osascript -e '${heidiScript}'`);
+    console.log(`[MAIN] Heidi restore result: ${heidiResult.stdout.trim()}`);
+
+    // Restore EMR window to full width
+    const emrScript = `
+      tell application "System Events"
+        tell process "${linkedEmrWindow.appName}"
+          try
+            set windowList to every window
+            set windowCount to count of windowList
+            if windowCount > 0 then
+              repeat with win in windowList
+                try
+                  set winTitle to name of win
+                  if winTitle contains "${linkedEmrWindow.windowTitle}" or "${linkedEmrWindow.windowTitle}" contains winTitle then
+                    set winSize to size of win
+                    set winPos to position of win
+                    set winHeight to item 2 of winSize
+                    set winY to item 2 of winPos
+                    set position of win to {0, winY}
+                    set size of win to {${screenWidth}, winHeight}
+                    return "emr|restored"
+                  end if
+                end try
+              end repeat
+              -- Fallback: restore first window if title match fails
+              set win to item 1 of windowList
+              set winSize to size of win
+              set winPos to position of win
+              set winHeight to item 2 of winSize
+              set winY to item 2 of winPos
+              set position of win to {0, winY}
+              set size of win to {${screenWidth}, winHeight}
+              return "emr|restored_fallback"
+            end if
+          on error errMsg
+            return "emr|error|" & errMsg
+          end try
+        end tell
+        return "emr|not_found"
+      end tell
+    `;
+
+    const emrResult = await execAsync(`osascript -e '${emrScript}'`);
+    console.log(`[MAIN] EMR restore result: ${emrResult.stdout.trim()}`);
+  } catch (error) {
+    console.error("[MAIN] Error restoring linked windows:", error);
+  }
+}
+
+/**
  * Get frontmost window info (app name and window title)
  */
 async function getFrontmostWindowInfo(): Promise<{
@@ -803,6 +1046,153 @@ function matchesLinkedEmrWindow(appName: string, windowTitle: string): boolean {
 }
 
 /**
+ * Activate an application and bring its window to front using AppleScript
+ */
+async function activateApplicationWindow(
+  appName: string,
+  windowTitle?: string
+): Promise<void> {
+  if (process.platform !== "darwin") {
+    console.log("[MAIN] Window switching only supported on macOS");
+    return;
+  }
+
+  try {
+    let script: string;
+    if (windowTitle) {
+      // Try to activate specific window by title
+      script = `
+        tell application "System Events"
+          tell process "${appName}"
+            set windowFound to false
+            repeat with win in every window
+              try
+                set winTitle to name of win
+                if winTitle contains "${windowTitle}" or "${windowTitle}" contains winTitle then
+                  set frontmost to true
+                  set windowFound to true
+                  exit repeat
+                end if
+              end try
+            end repeat
+            if not windowFound then
+              -- Fallback: activate first window
+              if (count of windows) > 0 then
+                set frontmost to true
+              end if
+            end if
+          end tell
+        end tell
+        tell application "${appName}"
+          activate
+        end tell
+      `;
+    } else {
+      // Just activate the application
+      script = `
+        tell application "${appName}"
+          activate
+        end tell
+      `;
+    }
+
+    await execAsync(`osascript -e '${script}'`);
+    console.log(`[MAIN] Activated application: ${appName}`);
+  } catch (error) {
+    console.error(
+      `[MAIN] Error activating application ${appName}:`,
+      error instanceof Error ? error.message : error
+    );
+  }
+}
+
+/**
+ * Switch between Heidi and linked EMR window (Option+Space shortcut)
+ */
+async function switchBetweenLinkedWindows(): Promise<void> {
+  if (!linkedEmrWindow) {
+    console.log(
+      "[MAIN] Cannot switch: No EMR window linked. Please link an EMR window first."
+    );
+    return;
+  }
+
+  const frontmostInfo = await getFrontmostWindowInfo();
+  if (!frontmostInfo) {
+    console.log("[MAIN] Cannot switch: Could not detect frontmost window");
+    return;
+  }
+
+  const { appName, windowTitle } = frontmostInfo;
+  const isHeidi = isHeidiWindow(appName, windowTitle);
+  const isLinkedEmr = matchesLinkedEmrWindow(appName, windowTitle);
+
+  if (isHeidi) {
+    // Currently in Heidi, switch to linked EMR
+    console.log(
+      `[MAIN] Switching from Heidi to linked EMR: ${linkedEmrWindow.appName}`
+    );
+    await activateApplicationWindow(
+      linkedEmrWindow.appName,
+      linkedEmrWindow.windowTitle
+    );
+  } else if (isLinkedEmr) {
+    // Currently in linked EMR, switch to Heidi
+    console.log("[MAIN] Switching from linked EMR to Heidi");
+    // Find Heidi application name (could be "Heidi" or similar)
+    // Try common Heidi app names
+    const heidiAppNames = ["Heidi", "heidi"];
+    let heidiFound = false;
+
+    for (const heidiAppName of heidiAppNames) {
+      try {
+        await activateApplicationWindow(heidiAppName);
+        heidiFound = true;
+        break;
+      } catch (error) {
+        // Try next app name
+        continue;
+      }
+    }
+
+    if (!heidiFound) {
+      // Fallback: try to find any app with "Heidi" in the name
+      const script = `
+        tell application "System Events"
+          repeat with proc in (every application process whose visible is true)
+            set procName to name of proc
+            if procName contains "Heidi" or procName contains "heidi" then
+              tell process procName
+                set frontmost to true
+              end tell
+              tell application procName
+                activate
+              end tell
+              return procName
+            end if
+          end repeat
+        end tell
+      `;
+      try {
+        const { stdout } = await execAsync(`osascript -e '${script}'`);
+        const result = stdout.trim();
+        if (result) {
+          console.log(`[MAIN] Found and activated Heidi app: ${result}`);
+        } else {
+          console.log("[MAIN] Could not find Heidi application");
+        }
+      } catch (error) {
+        console.error("[MAIN] Error finding Heidi application:", error);
+      }
+    }
+  } else {
+    console.log(
+      `[MAIN] Currently in ${appName}, not Heidi or linked EMR. Cannot switch.`
+    );
+  }
+}
+
+/**
  * Check if main panel should be allowed to open (only in Heidi or linked EMR context)
  */
 async function canOpenMainPanel(): Promise<boolean> {
@@ -864,24 +1254,40 @@ async function togglePanel(): Promise<void> {
       createMainPanelWindow();
     }
 
-    // Push the frontmost window to make room for the panel (macOS only).
-    // This will shrink the Heidi/EMR window so the panel sits on the right,
-    // similar to how Cursor pushes the editor.
+    // Push windows to make room for the panel (macOS only).
+    // If we have linked windows, push both Heidi and EMR.
+    // Otherwise, push the frontmost window.
     try {
-      const pushedBounds = await pushFrontmostWindow(panelWidth);
-      if (pushedBounds) {
+      if (linkedEmrWindow) {
+        // Push both linked windows
+        const { heidiBounds, emrBounds } = await pushLinkedWindows(panelWidth);
+        savedHeidiBounds = heidiBounds;
+        savedEmrBounds = emrBounds;
+        // Also save the frontmost one for backwards compatibility
+        const pushedBounds = await pushFrontmostWindow(panelWidth);
         savedWindowBounds = pushedBounds;
-        hasPushedWindow = true;
+        hasPushedWindow = !!(heidiBounds || emrBounds || pushedBounds);
       } else {
-        savedWindowBounds = null;
-        hasPushedWindow = false;
+        // No linked windows, just push frontmost window
+        const pushedBounds = await pushFrontmostWindow(panelWidth);
+        if (pushedBounds) {
+          savedWindowBounds = pushedBounds;
+          hasPushedWindow = true;
+        } else {
+          savedWindowBounds = null;
+          hasPushedWindow = false;
+        }
+        savedHeidiBounds = null;
+        savedEmrBounds = null;
       }
     } catch (error) {
       console.error(
-        "[MAIN] Error pushing frontmost window before opening panel:",
+        "[MAIN] Error pushing windows before opening panel:",
         error
       );
       savedWindowBounds = null;
+      savedHeidiBounds = null;
+      savedEmrBounds = null;
       hasPushedWindow = false;
     }
 
@@ -929,17 +1335,49 @@ async function togglePanel(): Promise<void> {
     // Hide panel
     await slideOut(panelWidth);
 
-    // Restore any window we previously pushed
-    if (hasPushedWindow && savedWindowBounds) {
-      try {
-        await restoreFrontmostWindow(savedWindowBounds);
-      } catch (error) {
-        console.error(
-          "[MAIN] Error restoring frontmost window on panel close:",
-          error
-        );
+    // Restore windows that were pushed
+    if (hasPushedWindow) {
+      // Restore linked windows if we have them
+      if (linkedEmrWindow && (savedHeidiBounds || savedEmrBounds)) {
+        try {
+          // Restore Heidi window if it was pushed
+          if (savedHeidiBounds) {
+            await restoreFrontmostWindow(savedHeidiBounds);
+          }
+          // Restore EMR window if it was pushed
+          if (savedEmrBounds) {
+            await restoreFrontmostWindow(savedEmrBounds);
+          }
+          // Also ensure both are full width (in case restore didn't work perfectly)
+          await restoreLinkedWindows();
+        } catch (error) {
+          console.error(
+            "[MAIN] Error restoring linked windows on panel close:",
+            error
+          );
+          // Fallback: try to restore both to full width
+          try {
+            await restoreLinkedWindows();
+          } catch (fallbackError) {
+            console.error("[MAIN] Error in fallback restore:", fallbackError);
+          }
+        }
+      } else if (savedWindowBounds) {
+        // No linked windows, just restore the frontmost window that was pushed
+        try {
+          await restoreFrontmostWindow(savedWindowBounds);
+        } catch (error) {
+          console.error(
+            "[MAIN] Error restoring frontmost window on panel close:",
+            error
+          );
+        }
       }
+
+      // Clear saved bounds
       savedWindowBounds = null;
+      savedHeidiBounds = null;
+      savedEmrBounds = null;
       hasPushedWindow = false;
     }
 
@@ -1352,17 +1790,52 @@ async function updateFloatingIconVisibility(): Promise<void> {
         mainWindow.hide();
       }
 
-      // Restore any window we previously pushed when the panel auto-closes
-      if (hasPushedWindow && savedWindowBounds) {
-        try {
-          await restoreFrontmostWindow(savedWindowBounds);
-        } catch (error) {
-          console.error(
-            "[MAIN] Error restoring frontmost window on auto panel close:",
-            error
-          );
+      // Restore windows that were pushed when the panel auto-closes
+      if (hasPushedWindow) {
+        // Restore linked windows if we have them
+        if (linkedEmrWindow && (savedHeidiBounds || savedEmrBounds)) {
+          try {
+            // Restore Heidi window if it was pushed
+            if (savedHeidiBounds) {
+              await restoreFrontmostWindow(savedHeidiBounds);
+            }
+            // Restore EMR window if it was pushed
+            if (savedEmrBounds) {
+              await restoreFrontmostWindow(savedEmrBounds);
+            }
+            // Also ensure both are full width (in case restore didn't work perfectly)
+            await restoreLinkedWindows();
+          } catch (error) {
+            console.error(
+              "[MAIN] Error restoring linked windows on auto panel close:",
+              error
+            );
+            // Fallback: try to restore both to full width
+            try {
+              await restoreLinkedWindows();
+            } catch (fallbackError) {
+              console.error(
+                "[MAIN] Error in fallback restore on auto close:",
+                fallbackError
+              );
+            }
+          }
+        } else if (savedWindowBounds) {
+          // No linked windows, just restore the frontmost window that was pushed
+          try {
+            await restoreFrontmostWindow(savedWindowBounds);
+          } catch (error) {
+            console.error(
+              "[MAIN] Error restoring frontmost window on auto panel close:",
+              error
+            );
+          }
         }
+
+        // Clear saved bounds
         savedWindowBounds = null;
+        savedHeidiBounds = null;
+        savedEmrBounds = null;
         hasPushedWindow = false;
       }
     }
@@ -1437,6 +1910,9 @@ app.whenReady().then(async () => {
         pairingWindow.close();
       }
 
+      // Small delay to ensure pairing window closes
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
       // Auto-open main panel after connecting
       // Check if we're in Heidi context (pairing window only shows in Heidi context)
       // Even if frontmost is our pairing window, we should allow opening
@@ -1447,7 +1923,37 @@ app.whenReady().then(async () => {
 
       // If we're in Heidi context or were in Heidi context, allow opening
       if ((isInHeidiContext || lastKnownHeidiContext) && !isPanelVisible) {
-        // Open main panel automatically
+        // Ensure Heidi/EMR is frontmost before opening panel (so window pushing works correctly)
+        if (isInHeidiContext && frontmostInfo) {
+          // We're in Heidi, make sure Heidi is frontmost
+          const heidiAppNames = ["Heidi", "heidi"];
+          for (const heidiAppName of heidiAppNames) {
+            try {
+              await activateApplicationWindow(heidiAppName);
+              break;
+            } catch (error) {
+              // Try next app name
+              continue;
+            }
+          }
+        } else if (lastKnownHeidiContext) {
+          // We were in Heidi context, reactivate Heidi
+          const heidiAppNames = ["Heidi", "heidi"];
+          for (const heidiAppName of heidiAppNames) {
+            try {
+              await activateApplicationWindow(heidiAppName);
+              break;
+            } catch (error) {
+              // Try next app name
+              continue;
+            }
+          }
+        }
+
+        // Small delay to ensure window activation completes
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        // Open main panel automatically (this will push the window)
         await togglePanel();
       } else if (floatingIconWindow && !isPanelVisible) {
         // Ensure icon is at bottom-right and visible
@@ -1570,9 +2076,14 @@ app.whenReady().then(async () => {
     clearSession();
   });
 
-  // Command+Shift+H: Toggle panel (slide in/out with window push)
-  globalShortcut.register("CommandOrControl+Shift+H", async () => {
+  // Option+Y: Toggle panel (slide in/out with window push)
+  globalShortcut.register("Alt+Y", async () => {
     await togglePanel();
+  });
+
+  // Option+Tab: Switch between Heidi and linked EMR window
+  globalShortcut.register("Alt+Tab", async () => {
+    await switchBetweenLinkedWindows();
   });
 
   app.on("activate", () => {
