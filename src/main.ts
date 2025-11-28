@@ -1193,9 +1193,14 @@ async function switchBetweenLinkedWindows(): Promise<void> {
 }
 
 /**
- * Check if main panel should be allowed to open (only in Heidi or linked EMR context)
+ * Check if main panel should be allowed to open (only when linked to EMR)
  */
 async function canOpenMainPanel(): Promise<boolean> {
+  // Main panel can ONLY open when linked to an EMR window
+  if (!linkedEmrWindow) {
+    return false;
+  }
+
   const frontmostInfo = await getFrontmostWindowInfo();
   if (!frontmostInfo) {
     return false;
@@ -1210,27 +1215,15 @@ async function canOpenMainPanel(): Promise<boolean> {
   const isHeidi = isHeidiWindow(appName, windowTitle);
 
   // When one of our own Electron windows is frontmost (icon, pairing, panel),
-  // allow opening based on our last known valid context instead of the
-  // frontmost app name. This is important when connecting from the pairing
+  // allow opening since we're linked. This is important when connecting from the pairing
   // window, which is an Electron window.
   if (isOurWindow) {
-    if (!linkedEmrWindow) {
-      // Before link, only allow if we know we came from Heidi
-      return lastKnownHeidiContext;
-    }
-    // After link, we only ever show our UI when it was triggered from
-    // Heidi or the linked EMR, so it's safe to allow opening.
     return true;
   }
 
-  if (!linkedEmrWindow) {
-    // Before link: only allow in Heidi context
-    return isHeidi;
-  } else {
-    // After link: allow in Heidi or linked EMR context
-    const isLinkedEmr = matchesLinkedEmrWindow(appName, windowTitle);
-    return isHeidi || isLinkedEmr;
-  }
+  // After link: allow in Heidi or linked EMR context
+  const isLinkedEmr = matchesLinkedEmrWindow(appName, windowTitle);
+  return isHeidi || isLinkedEmr;
 }
 
 /**
@@ -1242,9 +1235,15 @@ async function togglePanel(): Promise<void> {
   // Check if we're in the right context to open panel
   const canOpen = await canOpenMainPanel();
   if (!canOpen && !isPanelVisible) {
-    console.log(
-      "[MAIN] Cannot open panel - not in Heidi or linked EMR context"
-    );
+    if (!linkedEmrWindow) {
+      console.log(
+        "[MAIN] Cannot open panel - no EMR window linked. Please link an EMR window first."
+      );
+    } else {
+      console.log(
+        "[MAIN] Cannot open panel - not in Heidi or linked EMR context"
+      );
+    }
     return;
   }
 
@@ -1644,6 +1643,18 @@ async function validateLinkedEmrWindow(): Promise<void> {
  * Window watcher - shows/hides floating icon and main panel based on frontmost window
  */
 async function updateFloatingIconVisibility(): Promise<void> {
+  // If main panel is visible, ensure icon and pairing window stay hidden
+  if (isPanelVisible) {
+    if (floatingIconWindow && floatingIconWindow.isVisible()) {
+      floatingIconWindow.hide();
+    }
+    if (pairingWindow && pairingWindow.isVisible()) {
+      pairingWindow.hide();
+    }
+    // Don't update visibility while panel is open
+    return;
+  }
+
   // Validate linked window still exists (check every 5 seconds)
   const shouldValidate = Math.random() < 0.2; // ~20% chance per call (roughly every 5 seconds)
   if (shouldValidate) {
