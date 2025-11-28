@@ -3,46 +3,27 @@ import { AgentState } from "./types/agent";
 
 export interface ElectronAPI {
   agent: {
-    refreshHeidiData: () => Promise<{
+    captureAndEnrich: () => Promise<{
       success: boolean;
-      snapshot?: {
-        source: "ocr" | "api" | "ai";
-        capturedAt: number;
-        fields: Array<{ id: string; label: string; value: string }>;
-      };
       error?: string;
     }>;
     selectPreviousField: () => Promise<{ success: boolean }>;
     selectNextField: () => Promise<{ success: boolean }>;
     pasteCurrentField: () => Promise<{ success: boolean }>;
+    clearSession: () => Promise<{ success: boolean }>;
     getState: () => Promise<{ state: AgentState }>;
-    getHeidiSnapshot: () => Promise<{
-      success: boolean;
-      snapshot?: {
-        source: "ocr" | "api" | "ai";
-        capturedAt: number;
-        fields: Array<{
-          id: string;
-          label: string;
-          value: string;
-          type?: string;
-          confidence?: number;
-        }>;
-      };
-      error?: string;
-    }>;
     onStateUpdated: (callback: (update: { state: AgentState }) => void) => void;
   };
 }
 
 const electronAPI: ElectronAPI = {
   agent: {
-    refreshHeidiData: () => ipcRenderer.invoke("agent:refreshHeidi"),
+    captureAndEnrich: () => ipcRenderer.invoke("agent:captureAndEnrich"),
     selectPreviousField: () => ipcRenderer.invoke("agent:selectPreviousField"),
     selectNextField: () => ipcRenderer.invoke("agent:selectNextField"),
     pasteCurrentField: () => ipcRenderer.invoke("agent:pasteCurrentField"),
+    clearSession: () => ipcRenderer.invoke("agent:clearSession"),
     getState: () => ipcRenderer.invoke("agent:getState"),
-    getHeidiSnapshot: () => ipcRenderer.invoke("agent:getHeidiSnapshot"),
     onStateUpdated: (callback) => {
       ipcRenderer.on("agent:stateUpdated", (_, update) => callback(update));
     },

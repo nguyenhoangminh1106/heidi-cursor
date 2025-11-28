@@ -38,7 +38,7 @@ function FieldPreview({ currentField, nextField, currentIndex, totalFields }: Fi
         ) : (
           <div className="field-placeholder">
             {totalFields === 0 
-              ? "No Heidi fields available. Press Ctrl+Shift+C to capture Heidi."
+              ? "No session fields available. Press ⌥C to capture screen."
               : "No field selected"}
           </div>
         )}

@@ -8,20 +8,12 @@ import "./electron.d";
 function App() {
   const [state, setState] = useState<AgentState>({
     status: "idle",
+    sessionFields: [],
     currentIndex: 0,
   });
   const [error, setError] = useState<string | null>(null);
-  const [isRefreshingHeidi, setIsRefreshingHeidi] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
-  const [heidiFields, setHeidiFields] = useState<
-    Array<{
-      id: string;
-      label: string;
-      value: string;
-      type?: string;
-      confidence?: number;
-    }>
-  >([]);
 
   useEffect(() => {
     // Wait for electronAPI to be available
@@ -55,24 +47,10 @@ function App() {
       }
     });
 
-    // Load Heidi snapshot on mount
-    loadHeidiSnapshot();
-
     return () => {
       // Cleanup if needed
     };
   }, []);
-
-  const loadHeidiSnapshot = async () => {
-    try {
-      const result = await window.electronAPI.agent.getHeidiSnapshot();
-      if (result.success && result.snapshot) {
-        setHeidiFields(result.snapshot.fields);
-      }
-    } catch (err) {
-      console.error("Error loading Heidi snapshot:", err);
-    }
-  };
 
   const handlePrevField = async () => {
     try {
@@ -110,29 +88,16 @@ function App() {
     }
   };
 
-  const handleRefreshHeidi = async () => {
-    setIsRefreshingHeidi(true);
+  const handleCaptureAndEnrich = async () => {
+    setIsCapturing(true);
     setError(null);
     try {
-      if (!window.electronAPI?.agent?.refreshHeidiData) {
-        throw new Error(
-          "refreshHeidiData API not available. Please restart the app."
-        );
-      }
-      const result = await window.electronAPI.agent.refreshHeidiData();
+      const result = await window.electronAPI.agent.captureAndEnrich();
       if (!result.success && result.error) {
         setError(result.error);
         setTimeout(() => setError(null), 5000);
       } else {
         setError(null);
-        if (result.snapshot) {
-          console.log(
-            "Heidi data refreshed:",
-            result.snapshot.fields.length,
-            "fields"
-          );
-          setHeidiFields(result.snapshot.fields);
-        }
       }
     } catch (err) {
       const errorMessage =
@@ -140,18 +105,31 @@ function App() {
       setError(errorMessage);
       setTimeout(() => setError(null), 5000);
     } finally {
-      setIsRefreshingHeidi(false);
+      setIsCapturing(false);
     }
   };
 
+  const handleClearSession = async () => {
+    try {
+      await window.electronAPI.agent.clearSession();
+      setError(null);
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Unknown error occurred";
+      setError(errorMessage);
+      setTimeout(() => setError(null), 5000);
+    }
+  };
+
+  const sessionFields = state?.sessionFields || [];
   const currentFieldIndex = state?.currentIndex ?? 0;
   const currentField =
-    heidiFields.length > 0 && currentFieldIndex < heidiFields.length
-      ? heidiFields[currentFieldIndex]
+    sessionFields.length > 0 && currentFieldIndex < sessionFields.length
+      ? sessionFields[currentFieldIndex]
       : null;
   const nextField =
-    heidiFields.length > 0 && currentFieldIndex + 1 < heidiFields.length
-      ? heidiFields[currentFieldIndex + 1]
+    sessionFields.length > 0 && currentFieldIndex + 1 < sessionFields.length
+      ? sessionFields[currentFieldIndex + 1]
       : null;
 
   return (
@@ -160,15 +138,15 @@ function App() {
         <h1>Heidi Cursor Agent</h1>
         <div className="status-badge" data-status={state?.status || "idle"}>
           {state?.status === "idle" && "Ready"}
-          {state?.status === "synced" && "Ready"}
-          {state?.status === "filling" && "Filling"}
+          {state?.status === "capturing" && "Capturing..."}
+          {state?.status === "typing" && "Typing..."}
           {state?.status === "error" && "Error"}
         </div>
       </div>
 
-      {heidiFields.length > 0 && (
+      {sessionFields.length > 0 && (
         <div className="progress-indicator">
-          Field {currentFieldIndex + 1} of {heidiFields.length}
+          Field {currentFieldIndex + 1} of {sessionFields.length}
         </div>
       )}
 
@@ -188,29 +166,26 @@ function App() {
         currentField={currentField}
         nextField={nextField}
         currentIndex={currentFieldIndex}
-        totalFields={heidiFields.length}
+        totalFields={sessionFields.length}
       />
 
       <Controls
         status={state?.status || "idle"}
-        onRefreshHeidi={handleRefreshHeidi}
-        onPrevField={handlePrevField}
-        onNextField={handleNextField}
-        onPasteCurrent={handlePasteCurrent}
-        isRefreshingHeidi={isRefreshingHeidi}
+        onCaptureAndEnrich={handleCaptureAndEnrich}
+        onClearSession={handleClearSession}
+        isCapturing={isCapturing}
+        hasSession={sessionFields.length > 0}
       />
 
       <div className="shortcuts-hint">
         <div style={{ fontWeight: "bold", marginBottom: "4px" }}>
-          Keyboard Shortcuts (Ctrl+Shift workflow)
+          Keyboard Shortcuts (Option-based workflow)
         </div>
-        <div>Ctrl+Shift+C: Capture Heidi (extract fields)</div>
-        <div>Ctrl+Shift+W: Move selection up</div>
-        <div>Ctrl+Shift+S: Move selection down</div>
-        <div>Ctrl+Shift+P: Type current field</div>
-        <div style={{ fontSize: "10px", color: "#666", marginTop: "4px" }}>
-          ⌘⇧H: Refresh Heidi (alternative)
-        </div>
+        <div>⌥C: Capture screen and enrich session</div>
+        <div>⌥W: Move selection up</div>
+        <div>⌥S: Move selection down</div>
+        <div>⌥V: Type current field</div>
+        <div>⌥X: Clear session</div>
         <div
           style={{
             fontSize: "9px",
@@ -219,16 +194,13 @@ function App() {
             fontStyle: "italic",
           }}
         >
-          Note: This is a simplified Heidi-only workflow. Navigate Heidi fields
-          and paste into EMR fields manually as needed.
+          Generic bidirectional workflow: capture from any app, navigate fields,
+          and type into any app.
         </div>
         <button
           className="btn-debug"
           onClick={() => {
             setShowDebugPanel(!showDebugPanel);
-            if (!showDebugPanel) {
-              loadHeidiSnapshot();
-            }
           }}
           style={{
             marginTop: "8px",
@@ -252,22 +224,24 @@ function App() {
             padding: "12px",
             background: "#f5f5f5",
             borderRadius: "8px",
-            maxHeight: "400px",
+            maxHeight: "800px",
             overflowY: "auto",
             fontSize: "12px",
           }}
         >
           <div style={{ fontWeight: "bold", marginBottom: "8px" }}>
-            Heidi Fields ({heidiFields.length})
+            Session Fields ({sessionFields.length})
           </div>
-          {heidiFields.length === 0 ? (
-            <div style={{ color: "#666" }}>No fields extracted yet</div>
+          {sessionFields.length === 0 ? (
+            <div style={{ color: "#666" }}>
+              No fields captured yet. Press ⌥C to capture screen.
+            </div>
           ) : (
-            heidiFields.map((field, idx) => {
+            sessionFields.map((field, idx) => {
               const isCurrent = idx === currentFieldIndex;
               return (
                 <div
-                  key={idx}
+                  key={field.id || idx}
                   style={{
                     marginBottom: "8px",
                     padding: "8px",
@@ -296,7 +270,7 @@ function App() {
                       ? field.value.substring(0, 100) + "..."
                       : field.value}
                   </div>
-                  {(field.type || field.confidence !== undefined) && (
+                  {field.source && (
                     <div
                       style={{
                         fontSize: "10px",
@@ -304,10 +278,7 @@ function App() {
                         marginTop: "4px",
                       }}
                     >
-                      {field.type && `Type: ${field.type}`}
-                      {field.type && field.confidence !== undefined && " • "}
-                      {field.confidence !== undefined &&
-                        `Confidence: ${(field.confidence * 100).toFixed(0)}%`}
+                      Source: {field.source}
                     </div>
                   )}
                 </div>

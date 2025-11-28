@@ -35,10 +35,19 @@ export interface AgentFieldMapping {
   heidiField: HeidiFieldValue | null; // null if no match
 }
 
-export type AgentStatus = "idle" | "synced" | "filling" | "error";
+export type AgentStatus = "idle" | "capturing" | "typing" | "error";
+
+export interface SessionField {
+  id: string;
+  label: string;
+  value: string;
+  source?: "heidi" | "emr" | "other";
+}
 
 export interface AgentState {
   status: AgentStatus;
-  currentIndex: number; // Index into Heidi fields (current Heidi field selection)
+  sessionId?: string; // Unique identifier for the current session
+  sessionFields: SessionField[]; // Generic key/value pairs captured in this session
+  currentIndex: number; // Index into sessionFields (selected key)
   lastError?: string;
 }

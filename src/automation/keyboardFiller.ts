@@ -13,23 +13,25 @@ function sleep(ms: number): Promise<void> {
 // Escape for AppleScript string literal
 // Handles special characters that might cause font/encoding issues
 function escapeAppleScriptString(str: string): string {
-  // Normalize the string to ensure proper encoding
-  let normalized = str.normalize("NFD");
+  // DO NOT normalize here - normalization happens before calling this function
+  // Normalizing to NFD breaks characters into base + combining marks which causes encoding issues
+
+  let escaped = str;
 
   // Escape backslashes first (must be first)
-  normalized = normalized.replace(/\\/g, "\\\\");
+  escaped = escaped.replace(/\\/g, "\\\\");
 
   // Escape double quotes
-  normalized = normalized.replace(/"/g, '\\"');
+  escaped = escaped.replace(/"/g, '\\"');
 
   // Escape newlines and carriage returns
-  normalized = normalized.replace(/\r/g, "\\r");
-  normalized = normalized.replace(/\n/g, "\\n");
+  escaped = escaped.replace(/\r/g, "\\r");
+  escaped = escaped.replace(/\n/g, "\\n");
 
   // Escape tabs
-  normalized = normalized.replace(/\t/g, "\\t");
+  escaped = escaped.replace(/\t/g, "\\t");
 
-  return normalized;
+  return escaped;
 }
 
 // Type the text directly character-by-character for maximum reliability
@@ -37,9 +39,10 @@ function escapeAppleScriptString(str: string): string {
 async function typeTextDirect(text: string): Promise<void> {
   console.log(`[AUTOMATION] Typing ${text.length} characters directly...`);
 
-  // Ensure text is properly normalized before typing
-  // This helps prevent font/encoding errors
-  const normalizedText = text.normalize("NFC"); // Normalize to composed form for better compatibility
+  // Normalize to NFC (composed form) to ensure proper character encoding
+  // NFC keeps characters like "é" as single composed characters, not decomposed (e + accent)
+  // This prevents encoding issues when typing
+  const normalizedText = text.normalize("NFC");
 
   // For short text (< 50 chars), try typing all at once first (faster)
   // For longer text, always use character-by-character (more reliable)
@@ -148,6 +151,47 @@ export async function pressTab(): Promise<void> {
         );
       }
       throw new Error(`Failed to press Tab: ${error.message}`);
+    }
+    throw error;
+  }
+}
+
+// Use AppleScript to press Command+V (paste from clipboard)
+export async function pressCommandV(): Promise<void> {
+  console.log(`[AUTOMATION] pressCommandV called`);
+  const script = `
+    tell application "System Events"
+      keystroke "v" using {command down}
+    end tell
+  `;
+
+  const command = `osascript -e '${script}'`;
+  console.log(`[AUTOMATION] Command+V command: ${command}`);
+
+  try {
+    console.log(`[AUTOMATION] Executing Command+V command...`);
+    const result = await execAsync(command);
+    console.log(`[AUTOMATION] Command+V command executed successfully`);
+    if (result.stdout)
+      console.log(`[AUTOMATION] Command+V stdout: ${result.stdout}`);
+    if (result.stderr)
+      console.log(`[AUTOMATION] Command+V stderr: ${result.stderr}`);
+    await sleep(PASTE_DELAY_MS);
+    console.log(`[AUTOMATION] pressCommandV completed successfully`);
+  } catch (error) {
+    console.error(`[AUTOMATION] Error in pressCommandV:`, error);
+    if (error instanceof Error) {
+      console.error(`[AUTOMATION] Command+V error message: ${error.message}`);
+      console.error(`[AUTOMATION] Command+V error stack: ${error.stack}`);
+      if (
+        error.message.includes("not allowed assistive") ||
+        error.message.includes("assistive")
+      ) {
+        throw new Error(
+          "Accessibility permissions required. Please grant permissions in System Settings → Privacy & Security → Accessibility."
+        );
+      }
+      throw new Error(`Failed to press Command+V: ${error.message}`);
     }
     throw error;
   }

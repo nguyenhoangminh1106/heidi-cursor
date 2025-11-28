@@ -1,15 +1,26 @@
 import "dotenv/config";
-import { app, BrowserWindow, globalShortcut, ipcMain } from "electron";
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  globalShortcut,
+  ipcMain,
+} from "electron";
 import * as path from "path";
-import { fillField } from "./automation/keyboardFiller";
-import { heidiDataSource } from "./services/heidiDataSource";
-import { AgentState, HeidiSnapshot } from "./types/agent";
+import { pressCommandV } from "./automation/keyboardFiller";
+import { captureFullScreen } from "./services/screenshot";
+import {
+  extractSessionFieldsFromImage,
+  mergeSessionFields,
+} from "./services/sessionFieldExtractor";
+import { AgentState, SessionField } from "./types/agent";
 
 let mainWindow: BrowserWindow | null = null;
 
 // Agent state
 let agentState: AgentState = {
   status: "idle",
+  sessionFields: [],
   currentIndex: 0,
 };
 
@@ -33,20 +44,15 @@ function broadcastAgentState(): void {
 }
 
 /**
- * Get Heidi snapshot or throw error
- *
- * This is the new Heidi-only workflow: users capture Heidi screenshots (⌥C),
- * navigate between extracted fields (⌥W/⌥S), and paste values (⌥Tab).
- * No EMR layout analysis or fill-plan building is needed.
+ * Get session fields or throw error
  */
-function getHeidiSnapshotOrThrow(): HeidiSnapshot {
-  const snapshot = heidiDataSource.getSnapshot();
-  if (!snapshot || snapshot.fields.length === 0) {
+function getSessionFieldsOrThrow(): SessionField[] {
+  if (!agentState.sessionFields || agentState.sessionFields.length === 0) {
     throw new Error(
-      "No Heidi snapshot available. Please press Ctrl+Shift+C to capture Heidi and extract fields first."
+      "No session fields available. Please press ⌥C to capture screen and extract fields first."
     );
   }
-  return snapshot;
+  return agentState.sessionFields;
 }
 
 /**
@@ -58,12 +64,11 @@ function clampIndex(index: number, length: number): number {
 }
 
 /**
- * Select previous Heidi field (move selection up)
+ * Select previous session field (move selection up)
  */
 function selectPreviousField(): void {
   try {
-    const snapshot = getHeidiSnapshotOrThrow();
-    const fields = snapshot.fields;
+    const fields = getSessionFieldsOrThrow();
     if (fields.length === 0) {
       return; // No-op if no fields
     }
@@ -84,12 +89,11 @@ function selectPreviousField(): void {
 }
 
 /**
- * Select next Heidi field (move selection down)
+ * Select next session field (move selection down)
  */
 function selectNextField(): void {
   try {
-    const snapshot = getHeidiSnapshotOrThrow();
-    const fields = snapshot.fields;
+    const fields = getSessionFieldsOrThrow();
     if (fields.length === 0) {
       return; // No-op if no fields
     }
@@ -106,15 +110,14 @@ function selectNextField(): void {
 }
 
 /**
- * Paste current Heidi field value into active field
+ * Type current session field value into active field
  */
 async function pasteCurrentField(): Promise<void> {
   try {
-    const snapshot = getHeidiSnapshotOrThrow();
-    const fields = snapshot.fields;
+    const fields = getSessionFieldsOrThrow();
 
     if (fields.length === 0) {
-      const error = "No Heidi fields available";
+      const error = "No session fields available";
       updateAgentState({ status: "error", lastError: error });
       return;
     }
@@ -123,7 +126,7 @@ async function pasteCurrentField(): Promise<void> {
     const field = fields[currentIndex];
 
     if (!field.value) {
-      const error = `Selected Heidi field "${field.label}" has no value`;
+      const error = `Selected field "${field.label}" has no value`;
       updateAgentState({ status: "error", lastError: error });
       console.warn(`[MAIN] ${error}`);
       return;
@@ -137,20 +140,43 @@ async function pasteCurrentField(): Promise<void> {
       }"`
     );
 
-    updateAgentState({ status: "filling", lastError: undefined });
+    updateAgentState({ status: "typing", lastError: undefined });
 
-    // Longer delay to ensure target field is focused and ready
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    // Save current clipboard text to restore later
+    const previousText = clipboard.readText();
 
-    // Use fillField which types the text directly (not clipboard paste)
-    // This ensures proper character encoding and font compatibility
-    await fillField(field.value);
+    try {
+      // Write value to clipboard as plain text
+      clipboard.writeText(field.value ?? "");
 
-    // Additional delay after typing to ensure all characters are processed
-    await new Promise((resolve) => setTimeout(resolve, 100));
+      // Delay to ensure clipboard is fully set before proceeding
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Delay to ensure target field is focused and ready
+      await new Promise((resolve) => setTimeout(resolve, 400));
+
+      // Trigger Command+V to paste from clipboard (reliable and preserves encoding)
+      await pressCommandV();
+
+      // Wait longer after paste to ensure paste operation completes before restoring clipboard
+      // This is critical - if we restore too quickly, the paste might not complete
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    } finally {
+      // Restore previous clipboard text after paste has completed
+      try {
+        // Delay before restoring to ensure paste is fully processed
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        clipboard.writeText(previousText);
+      } catch (restoreError) {
+        console.warn(
+          "[MAIN] Failed to restore previous clipboard text:",
+          restoreError
+        );
+      }
+    }
 
     updateAgentState({ status: "idle" });
-    console.log("[MAIN] Typing completed successfully");
+    console.log("[MAIN] Typing (via paste) completed successfully");
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : "Failed to type field";
@@ -166,55 +192,80 @@ async function pasteCurrentField(): Promise<void> {
 }
 
 /**
- * Handle refresh Heidi data (capture Heidi and extract fields)
+ * Handle capture and enrich session (⌥C: capture screen and enrich session)
  */
-async function handleRefreshHeidi(): Promise<{
+async function handleCaptureAndEnrich(): Promise<{
   success: boolean;
-  snapshot?: {
-    source: "ocr" | "api" | "ai";
-    capturedAt: number;
-    fields: Array<{ id: string; label: string; value: string }>;
-  };
   error?: string;
 }> {
-  console.log("[MAIN] handleRefreshHeidi called (⌥C: capture Heidi)");
+  console.log("[MAIN] handleCaptureAndEnrich called (⌥C: capture and enrich)");
 
   try {
-    const snapshot = await heidiDataSource.refreshSnapshot();
+    updateAgentState({ status: "capturing", lastError: undefined });
+
+    // Initialize session if needed
+    if (!agentState.sessionId) {
+      agentState.sessionId = `session_${Date.now()}`;
+    }
+
+    // Capture full screen
+    const imageBuffer = await captureFullScreen();
+    console.log("[MAIN] Captured screen for session field extraction");
+
+    // Extract fields from screenshot
+    const incomingFields = await extractSessionFieldsFromImage(imageBuffer);
     console.log(
-      "[MAIN] Heidi snapshot refreshed with",
-      snapshot.fields.length,
-      "fields"
+      `[MAIN] Extracted ${incomingFields.length} fields from screenshot`
     );
 
-    // Reset currentIndex to 0 when new snapshot is loaded
-    // Clamp it to valid range in case fields.length changed
-    const newIndex = clampIndex(0, snapshot.fields.length);
+    // Merge with existing session fields (prevent overlap)
+    const mergedFields = mergeSessionFields(
+      agentState.sessionFields,
+      incomingFields
+    );
+
+    // Update state
+    const newIndex =
+      agentState.sessionFields.length === 0 && mergedFields.length > 0
+        ? 0
+        : clampIndex(agentState.currentIndex, mergedFields.length);
+
     updateAgentState({
       status: "idle",
+      sessionFields: mergedFields,
       currentIndex: newIndex,
       lastError: undefined,
     });
 
-    return {
-      success: true,
-      snapshot: {
-        source: snapshot.source,
-        capturedAt: snapshot.capturedAt,
-        fields: snapshot.fields.map((f) => ({
-          id: f.id,
-          label: f.label,
-          value: f.value,
-        })),
-      },
-    };
+    console.log(
+      `[MAIN] Session enriched: ${mergedFields.length} total fields (added ${
+        mergedFields.length - agentState.sessionFields.length
+      } new)`
+    );
+
+    return { success: true };
   } catch (error) {
-    console.error("[MAIN] Error in handleRefreshHeidi:", error);
+    console.error("[MAIN] Error in handleCaptureAndEnrich:", error);
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
     updateAgentState({ status: "error", lastError: errorMessage });
     return { success: false, error: errorMessage };
   }
+}
+
+/**
+ * Clear current session (reset for new direction)
+ */
+function clearSession(): void {
+  console.log("[MAIN] clearSession called (⌥X: clear session)");
+  updateAgentState({
+    status: "idle",
+    sessionId: undefined,
+    sessionFields: [],
+    currentIndex: 0,
+    lastError: undefined,
+  });
+  console.log("[MAIN] Session cleared");
 }
 
 function createWindow() {
@@ -225,7 +276,7 @@ function createWindow() {
     resizable: true,
     minWidth: 320,
     minHeight: 400,
-    maxHeight: 800,
+    maxHeight: 1600,
     frame: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -255,44 +306,42 @@ function createWindow() {
 app.whenReady().then(() => {
   createWindow();
 
-  // Register global shortcuts for Heidi field navigation
+  // Register global shortcuts for session-based navigation
   //
-  // New Ctrl+Shift-based shortcut workflow (simplified Heidi-only mode):
-  // - Ctrl+Shift+C: Capture Heidi screen and extract fields
-  // - Ctrl+Shift+W: Move selection up (previous Heidi field)
-  // - Ctrl+Shift+S: Move selection down (next Heidi field)
-  // - Ctrl+Shift+P: Type current Heidi field value into active EMR field
-  //
-  // Note: This replaces the legacy EMR layout analysis + fill-plan workflow.
-  // Users now manually navigate Heidi fields and paste into EMR fields as needed.
+  // Option-based shortcut workflow (generic bidirectional mode):
+  // - ⌥C: Capture screen and enrich current session (add/merge key→value pairs)
+  // - ⌥W: Move selection up (previous key in session)
+  // - ⌥S: Move selection down (next key)
+  // - ⌥V: Type current key's value into active field
+  // - ⌥X: Clear current session (reset for new direction)
 
-  // Ctrl+Shift+C: Capture Heidi and extract fields
-  globalShortcut.register("CommandOrControl+Shift+C", async () => {
-    await handleRefreshHeidi();
+  // Alt+C: Capture screen and enrich session
+  globalShortcut.register("Alt+C", async () => {
+    await handleCaptureAndEnrich();
   });
 
-  // Ctrl+Shift+W: Move selection up (previous field)
-  globalShortcut.register("CommandOrControl+Shift+W", () => {
+  // Alt+W: Move selection up (previous field)
+  globalShortcut.register("Alt+W", () => {
     selectPreviousField();
   });
 
-  // Ctrl+Shift+S: Move selection down (next field)
-  globalShortcut.register("CommandOrControl+Shift+S", () => {
+  // Alt+S: Move selection down (next field)
+  globalShortcut.register("Alt+S", () => {
     selectNextField();
   });
 
-  // Ctrl+Shift+P: Type current Heidi field value into active field
-  globalShortcut.register("CommandOrControl+Shift+P", async () => {
+  // Alt+V: Type current field value into active field
+  globalShortcut.register("Alt+V", async () => {
     await pasteCurrentField();
   });
 
-  // Cmd+Shift+H: Refresh Heidi data (power-user shortcut, kept for compatibility)
-  globalShortcut.register("CommandOrControl+Shift+H", async () => {
-    await handleRefreshHeidi();
+  // Alt+X: Clear session
+  globalShortcut.register("Alt+X", () => {
+    clearSession();
   });
 
   // IPC handlers
-  ipcMain.handle("agent:refreshHeidi", handleRefreshHeidi);
+  ipcMain.handle("agent:captureAndEnrich", handleCaptureAndEnrich);
   ipcMain.handle("agent:selectPreviousField", async () => {
     selectPreviousField();
     return { success: true };
@@ -305,27 +354,12 @@ app.whenReady().then(() => {
     await pasteCurrentField();
     return { success: true };
   });
+  ipcMain.handle("agent:clearSession", () => {
+    clearSession();
+    return { success: true };
+  });
   ipcMain.handle("agent:getState", () => {
     return { state: agentState };
-  });
-  ipcMain.handle("agent:getHeidiSnapshot", () => {
-    const snapshot = heidiDataSource.getSnapshot();
-    return snapshot
-      ? {
-          success: true,
-          snapshot: {
-            source: snapshot.source,
-            capturedAt: snapshot.capturedAt,
-            fields: snapshot.fields.map((f) => ({
-              id: f.id,
-              label: f.label,
-              value: f.value,
-              type: f.type,
-              confidence: f.confidence,
-            })),
-          },
-        }
-      : { success: false, error: "No Heidi snapshot available" };
   });
 
   app.on("activate", () => {
