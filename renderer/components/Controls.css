@@ -1,6 +1,7 @@
 .controls {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .btn {
@@ -48,5 +49,24 @@
 
 .btn-tertiary:hover {
   background: #dc2626;
+}
+
+.btn-sync {
+  background: #8b5cf6;
+  color: white;
+}
+
+.btn-sync:hover:not(:disabled) {
+  background: #7c3aed;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn:disabled:hover {
+  transform: none;
+  box-shadow: none;
 }
 

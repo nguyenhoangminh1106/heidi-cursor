@@ -1,36 +1,69 @@
 import React from 'react';
 import './Controls.css';
+import { AgentStatus } from '../../src/types/agent';
 
 interface ControlsProps {
-  status: 'idle' | 'running' | 'completed';
-  onStart: () => void;
-  onNext: () => void;
-  onReset: () => void;
+  status: AgentStatus;
+  onSync: () => void;
+  onFillNext: () => void;
+  onRefreshHeidi: () => void;
+  isSyncing: boolean;
+  isRefreshingHeidi: boolean;
 }
 
-function Controls({ status, onStart, onNext, onReset }: ControlsProps) {
+function Controls({ 
+  status, 
+  onSync, 
+  onFillNext, 
+  onRefreshHeidi,
+  isSyncing,
+  isRefreshingHeidi 
+}: ControlsProps) {
   return (
     <div className="controls">
+      <button 
+        className="btn btn-sync" 
+        onClick={onRefreshHeidi} 
+        disabled={isRefreshingHeidi}
+      >
+        {isRefreshingHeidi ? 'Refreshing...' : 'Refresh Heidi'}
+      </button>
+
       {status === 'idle' && (
-        <button className="btn btn-primary" onClick={onStart}>
-          Start
+        <button 
+          className="btn btn-primary" 
+          onClick={onSync} 
+          disabled={isSyncing}
+        >
+          {isSyncing ? 'Syncing...' : 'Sync to Field'}
         </button>
       )}
 
-      {status === 'running' && (
+      {(status === 'synced' || status === 'filling') && (
         <>
-          <button className="btn btn-secondary" onClick={onNext}>
-            Next Field
+          <button 
+            className="btn btn-sync" 
+            onClick={onSync} 
+            disabled={isSyncing}
+          >
+            {isSyncing ? 'Syncing...' : 'Sync'}
           </button>
-          <button className="btn btn-tertiary" onClick={onReset}>
-            Reset
+          <button 
+            className="btn btn-secondary" 
+            onClick={onFillNext}
+          >
+            Fill Next
           </button>
         </>
       )}
 
-      {status === 'completed' && (
-        <button className="btn btn-primary" onClick={onReset}>
-          Reset & Start Over
+      {status === 'error' && (
+        <button 
+          className="btn btn-primary" 
+          onClick={onSync} 
+          disabled={isSyncing}
+        >
+          {isSyncing ? 'Syncing...' : 'Retry Sync'}
         </button>
       )}
     </div>
@@ -38,4 +71,3 @@ function Controls({ status, onStart, onNext, onReset }: ControlsProps) {
 }
 
 export default Controls;
-

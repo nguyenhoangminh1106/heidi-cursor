@@ -1,46 +1,71 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer } from "electron";
+import { AgentFieldMapping, AgentState } from "./types/agent";
 
 export interface ElectronAPI {
   agent: {
-    start: () => Promise<void>;
-    next: () => Promise<{ success: boolean; error?: string }>;
-    reset: () => Promise<void>;
-    setFields: (fields: Array<{ id: string; label: string; value: string }>) => Promise<void>;
-    getState: () => Promise<{
-      currentIndex: number;
-      status: 'idle' | 'running' | 'completed';
-      currentField: { id: string; label: string; value: string } | null;
-      nextField: { id: string; label: string; value: string } | null;
-      totalFields: number;
+    syncToField: () => Promise<{
+      success: boolean;
+      mapping?: AgentFieldMapping;
+      error?: string;
+      ocrText?: string;
+      reasoning?: string;
     }>;
-    onStateUpdated: (callback: (state: {
-      currentIndex: number;
-      status: 'idle' | 'running' | 'completed';
-      currentField: { id: string; label: string; value: string } | null;
-      nextField: { id: string; label: string; value: string } | null;
-      totalFields: number;
-    }) => void) => void;
+    fillNext: () => Promise<{
+      success: boolean;
+      error?: string;
+      mapping?: AgentFieldMapping;
+    }>;
+    refreshHeidiData: () => Promise<{
+      success: boolean;
+      snapshot?: {
+        source: "ocr" | "api" | "ai";
+        capturedAt: number;
+        fields: Array<{ id: string; label: string; value: string }>;
+      };
+      error?: string;
+    }>;
+    getState: () => Promise<{ state: AgentState }>;
+    getHeidiSnapshot: () => Promise<{
+      success: boolean;
+      snapshot?: {
+        source: "ocr" | "api" | "ai";
+        capturedAt: number;
+        fields: Array<{
+          id: string;
+          label: string;
+          value: string;
+          type?: string;
+          confidence?: number;
+        }>;
+      };
+      error?: string;
+    }>;
+    onStateUpdated: (callback: (update: { state: AgentState }) => void) => void;
   };
 }
 
 const electronAPI: ElectronAPI = {
   agent: {
-    start: () => ipcRenderer.invoke('agent:start'),
-    next: () => ipcRenderer.invoke('agent:next'),
-    reset: () => ipcRenderer.invoke('agent:reset'),
-    setFields: (fields) => ipcRenderer.invoke('agent:set-fields', fields),
-    getState: () => ipcRenderer.invoke('agent:get-state'),
+    syncToField: () => ipcRenderer.invoke("agent:sync"),
+    fillNext: () => ipcRenderer.invoke("agent:fillNext"),
+    refreshHeidiData: () => ipcRenderer.invoke("agent:refreshHeidi"),
+    getState: () => ipcRenderer.invoke("agent:getState"),
+    getHeidiSnapshot: () => ipcRenderer.invoke("agent:getHeidiSnapshot"),
     onStateUpdated: (callback) => {
-      ipcRenderer.on('agent:state-updated', (_, state) => callback(state));
+      ipcRenderer.on("agent:stateUpdated", (_, update) => callback(update));
     },
   },
 };
 
-contextBridge.exposeInMainWorld('electronAPI', electronAPI);
+try {
+  contextBridge.exposeInMainWorld("electronAPI", electronAPI);
+  console.log("[PRELOAD] electronAPI exposed successfully");
+} catch (error) {
+  console.error("[PRELOAD] Error exposing electronAPI:", error);
+}
 
 declare global {
   interface Window {
     electronAPI: ElectronAPI;
   }
 }
-

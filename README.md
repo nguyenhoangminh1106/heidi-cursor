@@ -5,15 +5,21 @@ A floating Electron desktop application that automates form filling using RPA (R
 ## Features
 
 - **Floating Window**: Always-on-top window that floats above other applications
+- **Screen-Aware Field Detection**: Uses OCR + AI to automatically detect which EMR field you're currently editing
 - **Keyboard Automation**: Automatically types values and presses Tab to navigate between fields
 - **Field Preview**: Shows current field being filled and preview of next field
 - **Global Shortcuts**: Keyboard shortcuts work even when the window is not focused
-- **Step-by-step Control**: Manual control over each field fill operation
+- **Cursor-like Experience**: Tab to fill current field and automatically advance to next
+- **Sync to Focused Field**: Automatically syncs to the EMR field you're currently editing
 
 ## Prerequisites
 
 - Node.js 18+ and npm
-- macOS (for keyboard automation - requires accessibility permissions)
+- macOS (for keyboard automation and screen capture)
+- **Tesseract OCR**: Install via `brew install tesseract`
+- **Permissions Required**:
+  - Accessibility permissions (System Settings → Privacy & Security → Accessibility)
+  - Screen Recording permissions (System Settings → Privacy & Security → Screen Recording)
 
 ## Installation
 
@@ -70,7 +76,8 @@ This will:
 ### Keyboard Shortcuts
 
 - `Cmd+Shift+S`: Start the workflow
-- `Cmd+Shift+Tab`: Fill current field and advance to next
+- `Cmd+Shift+F`: Sync to focused EMR field (detects which field you're in using OCR + AI)
+- `Tab`: Fill current field and advance to next (Cursor-like experience)
 
 ### Demo Fields
 
@@ -86,9 +93,12 @@ The app comes pre-configured with demo fields:
 
 - **Main Process** (`src/main.ts`): Electron main process that manages the window, IPC, and global shortcuts
 - **Preload Script** (`src/preload.ts`): Secure bridge between main and renderer processes
-- **Automation Service** (`src/automation/keyboardFiller.ts`): Keyboard automation using macOS AppleScript (no native compilation required)
+- **Automation Service** (`src/automation/keyboardFiller.ts`): Keyboard automation using macOS AppleScript
+- **Screenshot Service** (`src/services/screenshot.ts`): Captures screenshots of the frontmost window or screen
+- **OCR Service** (`src/services/ocr.ts`): Extracts text from screenshots using Tesseract OCR
+- **Field Inference** (`src/services/fieldInference.ts`): Uses AI/LLM to match OCR text to Heidi field schema
 - **Renderer** (`renderer/`): React-based UI built with Vite
-- **Field Config** (`src/fieldsConfig.ts`): Static field definitions (extendable to API calls)
+- **Field Config** (`src/fieldsConfig.ts`): Heidi field schema with examples for matching
 
 ## Project Structure
 
@@ -129,14 +139,35 @@ npm start
 - Look for the Electron icon in the dock/menu bar
 - Try restarting the app
 
+## How It Works
+
+### Screen-Aware Field Detection
+
+1. **User clicks into an EMR field** (e.g., "Patient Name")
+2. **Press `Cmd+Shift+F` or click "Sync"** in the floating agent
+3. **Agent captures screenshot** around the mouse position
+4. **OCR extracts text** from the screenshot (labels, placeholders, etc.)
+5. **AI inference matches** the OCR text to Heidi field schema
+6. **Agent updates** its current field index to match where you are
+7. **Ready to fill** - Press Tab to auto-fill and advance
+
+### Field Matching
+
+The agent uses a heuristic-based matching system (with optional LLM fallback) to match EMR field labels to Heidi fields:
+
+- **Exact matches**: "Patient Name" → `patientName`
+- **Example matches**: "Name", "Full name" → `patientName`
+- **Partial matches**: Multiple keywords → best match
+
 ## Future Enhancements
 
 - Pull field values from Heidi API
 - Support for multiple EMR systems
 - Bi-directional sync between Heidi and EMR
-- Automatic field detection
+- LLM-based field inference (currently heuristic-based)
 - Custom field templates
 - History and undo functionality
+- Better OCR accuracy with specialized EMR models
 
 ## License
 
