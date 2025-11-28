@@ -1,29 +1,7 @@
-import { AgentFieldMapping, AgentState } from "./agent";
+import { AgentState } from "./agent";
 
 export interface AgentStateUpdate {
   state: AgentState;
-}
-
-export interface SyncRequest {
-  // Empty for now, could include options later
-}
-
-export interface SyncResponse {
-  success: boolean;
-  mapping?: AgentFieldMapping;
-  error?: string;
-  ocrText?: string;
-  reasoning?: string;
-}
-
-export interface FillNextRequest {
-  // Empty for now
-}
-
-export interface FillNextResponse {
-  success: boolean;
-  error?: string;
-  mapping?: AgentFieldMapping;
 }
 
 export interface RefreshHeidiRequest {

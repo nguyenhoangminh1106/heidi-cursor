@@ -9,7 +9,7 @@ export interface HeidiFieldValue {
 }
 
 export interface HeidiSnapshot {
-  source: 'ocr' | 'api' | 'ai';
+  source: "ocr" | "api" | "ai";
   capturedAt: number;
   fields: HeidiFieldValue[];
 }
@@ -25,9 +25,9 @@ export type EmrFieldId = string;
 
 export interface EmrFieldContext {
   id: EmrFieldId;
-  labelText: string;        // OCR label, e.g. "Patient Name"
+  labelText: string; // OCR label, e.g. "Patient Name"
   placeholderText?: string; // if available
-  bounds?: Rect;            // approx. bounding box if OCR provides it
+  bounds?: Rect; // approx. bounding box if OCR provides it
 }
 
 export interface AgentFieldMapping {
@@ -35,20 +35,10 @@ export interface AgentFieldMapping {
   heidiField: HeidiFieldValue | null; // null if no match
 }
 
-export type AgentStatus = 'idle' | 'synced' | 'filling' | 'error';
-
-// Import EMR layout types
-import { EmrField, EmrLayout } from './emr';
-import { FillPlan } from './fillPlan';
+export type AgentStatus = "idle" | "synced" | "filling" | "error";
 
 export interface AgentState {
   status: AgentStatus;
-  mapping: AgentFieldMapping[]; // Legacy: kept for backward compatibility
-  currentIndex: number; // Legacy: index into mapping
+  currentIndex: number; // Index into Heidi fields (current Heidi field selection)
   lastError?: string;
-  currentEmrField?: EmrField; // Current EMR field under cursor (from layout analysis)
-  emrLayout?: EmrLayout; // Current EMR layout if analyzed
-  fillPlan?: FillPlan; // Linear fill plan (new approach)
-  fillIndex?: number; // Current position in fill plan (0-based)
 }
-

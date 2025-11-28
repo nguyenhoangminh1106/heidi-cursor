@@ -4,68 +4,56 @@ import { AgentStatus } from '../../src/types/agent';
 
 interface ControlsProps {
   status: AgentStatus;
-  onSync: () => void;
-  onFillNext: () => void;
   onRefreshHeidi: () => void;
-  isSyncing: boolean;
+  onPrevField: () => void;
+  onNextField: () => void;
+  onPasteCurrent: () => void;
   isRefreshingHeidi: boolean;
 }
 
 function Controls({ 
   status, 
-  onSync, 
-  onFillNext, 
   onRefreshHeidi,
-  isSyncing,
+  onPrevField,
+  onNextField,
+  onPasteCurrent,
   isRefreshingHeidi 
 }: ControlsProps) {
   return (
     <div className="controls">
       <button 
-        className="btn btn-sync" 
+        className="btn btn-primary" 
         onClick={onRefreshHeidi} 
         disabled={isRefreshingHeidi}
       >
-        {isRefreshingHeidi ? 'Refreshing...' : 'Refresh Heidi'}
+        {isRefreshingHeidi ? 'Refreshing...' : 'Refresh Heidi (Ctrl+Shift+C)'}
       </button>
 
-      {status === 'idle' && (
+      <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
         <button 
-          className="btn btn-primary" 
-          onClick={onSync} 
-          disabled={isSyncing}
+          className="btn btn-secondary" 
+          onClick={onPrevField}
+          title="Move selection up (Ctrl+Shift+W)"
         >
-          {isSyncing ? 'Syncing...' : 'Sync to Field'}
+          ↑ Prev (Ctrl+Shift+W)
         </button>
-      )}
-
-      {(status === 'synced' || status === 'filling') && (
-        <>
-          <button 
-            className="btn btn-sync" 
-            onClick={onSync} 
-            disabled={isSyncing}
-          >
-            {isSyncing ? 'Syncing...' : 'Sync'}
-          </button>
-          <button 
-            className="btn btn-secondary" 
-            onClick={onFillNext}
-          >
-            Fill Next
-          </button>
-        </>
-      )}
-
-      {status === 'error' && (
         <button 
-          className="btn btn-primary" 
-          onClick={onSync} 
-          disabled={isSyncing}
+          className="btn btn-secondary" 
+          onClick={onNextField}
+          title="Move selection down (Ctrl+Shift+S)"
         >
-          {isSyncing ? 'Syncing...' : 'Retry Sync'}
+          ↓ Next (Ctrl+Shift+S)
         </button>
-      )}
+      </div>
+
+      <button 
+        className="btn btn-sync" 
+        onClick={onPasteCurrent}
+        style={{ marginTop: '8px' }}
+        title="Type current field value (Ctrl+Shift+P)"
+      >
+        Type Current (Ctrl+Shift+P)
+      </button>
     </div>
   );
 }

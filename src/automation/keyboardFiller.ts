@@ -11,19 +11,40 @@ function sleep(ms: number): Promise<void> {
 }
 
 // Escape for AppleScript string literal
+// Handles special characters that might cause font/encoding issues
 function escapeAppleScriptString(str: string): string {
-  return str.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  // Normalize the string to ensure proper encoding
+  let normalized = str.normalize("NFD");
+
+  // Escape backslashes first (must be first)
+  normalized = normalized.replace(/\\/g, "\\\\");
+
+  // Escape double quotes
+  normalized = normalized.replace(/"/g, '\\"');
+
+  // Escape newlines and carriage returns
+  normalized = normalized.replace(/\r/g, "\\r");
+  normalized = normalized.replace(/\n/g, "\\n");
+
+  // Escape tabs
+  normalized = normalized.replace(/\t/g, "\\t");
+
+  return normalized;
 }
 
 // Type the text directly character-by-character for maximum reliability
-// This is slower but much more stable across different EMR systems
+// This ensures proper font rendering and encoding across different EMR systems
 async function typeTextDirect(text: string): Promise<void> {
   console.log(`[AUTOMATION] Typing ${text.length} characters directly...`);
 
-  // For short text (< 50 chars), type all at once (faster)
-  // For longer text, type character-by-character (more reliable)
-  if (text.length <= 50) {
-    const escaped = escapeAppleScriptString(text);
+  // Ensure text is properly normalized before typing
+  // This helps prevent font/encoding errors
+  const normalizedText = text.normalize("NFC"); // Normalize to composed form for better compatibility
+
+  // For short text (< 50 chars), try typing all at once first (faster)
+  // For longer text, always use character-by-character (more reliable)
+  if (normalizedText.length <= 50) {
+    const escaped = escapeAppleScriptString(normalizedText);
     const script = `
       tell application "System Events"
         keystroke "${escaped}"
@@ -31,27 +52,39 @@ async function typeTextDirect(text: string): Promise<void> {
     `;
     try {
       await execAsync(`osascript -e '${script}'`);
-      await sleep(100 + text.length * 10); // Delay proportional to length
+      await sleep(100 + normalizedText.length * 10); // Delay proportional to length
+      console.log(`[AUTOMATION] Bulk typing completed successfully`);
     } catch (error) {
       console.error(
         `[AUTOMATION] Bulk typing failed, falling back to character-by-character:`,
         error
       );
-      // Fall through to character-by-character method
-      await typeTextCharacterByCharacter(text);
+      // Fall through to character-by-character method for reliability
+      await typeTextCharacterByCharacter(normalizedText);
     }
   } else {
-    // Long text: type character-by-character for reliability
-    await typeTextCharacterByCharacter(text);
+    // Long text: always type character-by-character for reliability
+    await typeTextCharacterByCharacter(normalizedText);
   }
 }
 
 // Type text character-by-character (most reliable but slower)
+// This method ensures proper font rendering for each character
 async function typeTextCharacterByCharacter(text: string): Promise<void> {
   console.log(`[AUTOMATION] Typing character-by-character for reliability...`);
 
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
+    const charCode = char.charCodeAt(0);
+
+    // Skip control characters that shouldn't be typed
+    if (charCode < 32 && charCode !== 9 && charCode !== 10 && charCode !== 13) {
+      console.warn(
+        `[AUTOMATION] Skipping control character at position ${i}: ${charCode}`
+      );
+      continue;
+    }
+
     const escaped = escapeAppleScriptString(char);
 
     const script = `
@@ -62,19 +95,21 @@ async function typeTextCharacterByCharacter(text: string): Promise<void> {
 
     try {
       await execAsync(`osascript -e '${script}'`);
-      // Small delay between characters (10-20ms)
+      // Small delay between characters (15ms) - ensures proper font rendering
       await sleep(15);
     } catch (error) {
       console.error(
-        `[AUTOMATION] Error typing character "${char}" at position ${i}:`,
+        `[AUTOMATION] Error typing character "${char}" (code: ${charCode}) at position ${i}:`,
         error
       );
       // Continue with next character even if one fails
+      // Add a small delay before continuing
+      await sleep(10);
     }
   }
 
-  // Final delay to ensure all characters are processed
-  await sleep(100);
+  // Final delay to ensure all characters are processed and rendered
+  await sleep(150);
 }
 
 // Use AppleScript to press Tab key

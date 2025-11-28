@@ -1,20 +1,15 @@
 import "dotenv/config";
 import { app, BrowserWindow, globalShortcut, ipcMain } from "electron";
 import * as path from "path";
-import { fillFieldAndTab, pressTab } from "./automation/keyboardFiller";
-import { isVisionAiEnabled } from "./config/aiConfig";
-import { getOrAnalyzeLayout } from "./services/emrLayoutAnalyzer";
-import { buildFillPlan } from "./services/fillPlanBuilder";
+import { fillField } from "./automation/keyboardFiller";
 import { heidiDataSource } from "./services/heidiDataSource";
-import { captureFullScreen } from "./services/screenshot";
-import { AgentFieldMapping, AgentState } from "./types/agent";
+import { AgentState, HeidiSnapshot } from "./types/agent";
 
 let mainWindow: BrowserWindow | null = null;
 
 // Agent state
 let agentState: AgentState = {
   status: "idle",
-  mapping: [],
   currentIndex: 0,
 };
 
@@ -38,205 +33,140 @@ function broadcastAgentState(): void {
 }
 
 /**
- * Handle sync / start fill: Builds the fill plan from EMR layout and Heidi snapshot
- * This is the new linear approach: analyze EMR once, build plan, then fill sequentially
+ * Get Heidi snapshot or throw error
+ *
+ * This is the new Heidi-only workflow: users capture Heidi screenshots (⌥C),
+ * navigate between extracted fields (⌥W/⌥S), and paste values (⌥Tab).
+ * No EMR layout analysis or fill-plan building is needed.
  */
-async function handleSync(): Promise<{
-  success: boolean;
-  mapping?: AgentFieldMapping;
-  error?: string;
-  ocrText?: string;
-  reasoning?: string;
-}> {
-  console.log("[MAIN] ========================================");
-  console.log("[MAIN] handleSync called (building fill plan)");
-  console.log("[MAIN] ========================================");
+function getHeidiSnapshotOrThrow(): HeidiSnapshot {
+  const snapshot = heidiDataSource.getSnapshot();
+  if (!snapshot || snapshot.fields.length === 0) {
+    throw new Error(
+      "No Heidi snapshot available. Please press Ctrl+Shift+C to capture Heidi and extract fields first."
+    );
+  }
+  return snapshot;
+}
 
+/**
+ * Clamp index to valid range
+ */
+function clampIndex(index: number, length: number): number {
+  if (length === 0) return 0;
+  return Math.max(0, Math.min(index, length - 1));
+}
+
+/**
+ * Select previous Heidi field (move selection up)
+ */
+function selectPreviousField(): void {
   try {
-    updateAgentState({ status: "synced", lastError: undefined });
-
-    // Get Heidi snapshot (refresh if needed)
-    let snapshot = heidiDataSource.getSnapshot();
-    if (!snapshot) {
-      console.log("[MAIN] No Heidi snapshot, refreshing...");
-      snapshot = await heidiDataSource.refreshSnapshot();
+    const snapshot = getHeidiSnapshotOrThrow();
+    const fields = snapshot.fields;
+    if (fields.length === 0) {
+      return; // No-op if no fields
     }
 
-    // Try AI-based EMR layout analysis if enabled
-    if (isVisionAiEnabled()) {
-      try {
-        // Capture full screen for layout analysis
-        const fullScreenBuffer = await captureFullScreen();
-        console.log("[MAIN] Captured full screen for EMR layout analysis");
-
-        // Analyze or get cached layout
-        const emrLayout = await getOrAnalyzeLayout(fullScreenBuffer);
-        console.log(
-          "[MAIN] EMR layout analyzed:",
-          emrLayout.fields.length,
-          "fields found (in tab order)"
-        );
-
-        // Build fill plan: map each EMR field to Heidi field
-        const fillPlan = await buildFillPlan(emrLayout, snapshot);
-        console.log("[MAIN] Fill plan built:", fillPlan.steps.length, "steps");
-
-        // Reset fill index to 0 (start from beginning)
-        updateAgentState({
-          status: "synced",
-          fillPlan,
-          fillIndex: 0,
-          emrLayout,
-        });
-
-        console.log(
-          "[MAIN] Fill plan ready. Press ⌥Tab to fill fields sequentially."
-        );
-        console.log("[MAIN] ========================================");
-
-        return {
-          success: true,
-        };
-      } catch (layoutError) {
-        console.error("[MAIN] EMR layout analysis failed:", layoutError);
-        const errorMessage =
-          layoutError instanceof Error
-            ? layoutError.message
-            : "Failed to analyze EMR layout";
-        updateAgentState({ status: "error", lastError: errorMessage });
-        return { success: false, error: errorMessage };
-      }
-    } else {
-      // Vision AI not enabled - fallback message
-      const error =
-        "Vision AI not enabled. Please configure OPENAI_API_KEY or CLAUDE_API_KEY in .env";
-      updateAgentState({ status: "error", lastError: error });
-      return { success: false, error };
-    }
+    const newIndex = clampIndex(agentState.currentIndex - 1, fields.length);
+    updateAgentState({ currentIndex: newIndex });
+    console.log(
+      `[MAIN] Selected previous field: ${newIndex + 1}/${fields.length}`
+    );
   } catch (error) {
-    console.error("[MAIN] ========================================");
-    console.error("[MAIN] Error in handleSync:", error);
-    console.error("[MAIN] ========================================");
     const errorMessage =
-      error instanceof Error ? error.message : "Unknown error";
+      error instanceof Error
+        ? error.message
+        : "Failed to select previous field";
     updateAgentState({ status: "error", lastError: errorMessage });
-    return { success: false, error: errorMessage };
+    console.error("[MAIN] Error selecting previous field:", errorMessage);
   }
 }
 
 /**
- * Handle fill next field: Linear fill using the fill plan
- * Simply walks through the plan sequentially, no per-field detection needed
+ * Select next Heidi field (move selection down)
  */
-async function handleFillNext(): Promise<{
-  success: boolean;
-  error?: string;
-  mapping?: AgentFieldMapping;
-}> {
-  console.log("[MAIN] ========================================");
-  console.log("[MAIN] handleFillNext called");
-  console.log("[MAIN] ========================================");
-
+function selectNextField(): void {
   try {
-    // Check if we have a fill plan
-    if (!agentState.fillPlan || agentState.fillIndex === undefined) {
-      const error =
-        "No fill plan available. Please press ⌘⇧F to build the fill plan first.";
+    const snapshot = getHeidiSnapshotOrThrow();
+    const fields = snapshot.fields;
+    if (fields.length === 0) {
+      return; // No-op if no fields
+    }
+
+    const newIndex = clampIndex(agentState.currentIndex + 1, fields.length);
+    updateAgentState({ currentIndex: newIndex });
+    console.log(`[MAIN] Selected next field: ${newIndex + 1}/${fields.length}`);
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Failed to select next field";
+    updateAgentState({ status: "error", lastError: errorMessage });
+    console.error("[MAIN] Error selecting next field:", errorMessage);
+  }
+}
+
+/**
+ * Paste current Heidi field value into active field
+ */
+async function pasteCurrentField(): Promise<void> {
+  try {
+    const snapshot = getHeidiSnapshotOrThrow();
+    const fields = snapshot.fields;
+
+    if (fields.length === 0) {
+      const error = "No Heidi fields available";
       updateAgentState({ status: "error", lastError: error });
-      return { success: false, error };
+      return;
     }
 
-    const fillPlan = agentState.fillPlan;
-    const fillIndex = agentState.fillIndex;
+    const currentIndex = clampIndex(agentState.currentIndex, fields.length);
+    const field = fields[currentIndex];
 
-    // Check if we've reached the end
-    if (fillIndex >= fillPlan.steps.length) {
-      const error = "Fill plan completed. All fields have been filled.";
-      updateAgentState({ status: "synced", lastError: error });
-      return { success: false, error };
+    if (!field.value) {
+      const error = `Selected Heidi field "${field.label}" has no value`;
+      updateAgentState({ status: "error", lastError: error });
+      console.warn(`[MAIN] ${error}`);
+      return;
     }
 
-    // Get the current step
-    const step = fillPlan.steps[fillIndex];
     console.log(
-      `[MAIN] Filling step ${fillIndex + 1}/${fillPlan.steps.length}:`,
-      step.emrLabel
+      `[MAIN] Typing field ${currentIndex + 1}/${fields.length}: "${
+        field.label
+      }" = "${field.value.substring(0, 50)}${
+        field.value.length > 50 ? "..." : ""
+      }"`
     );
-
-    // Get Heidi snapshot
-    let snapshot = heidiDataSource.getSnapshot();
-    if (!snapshot) {
-      console.log("[MAIN] No Heidi snapshot, refreshing...");
-      snapshot = await heidiDataSource.refreshSnapshot();
-    }
 
     updateAgentState({ status: "filling", lastError: undefined });
 
-    // Small delay to ensure EMR field is focused and ready
+    // Longer delay to ensure target field is focused and ready
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // Use fillField which types the text directly (not clipboard paste)
+    // This ensures proper character encoding and font compatibility
+    await fillField(field.value);
+
+    // Additional delay after typing to ensure all characters are processed
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    // If there's a Heidi field mapped, fill it; otherwise just Tab (skip)
-    if (step.heidiFieldId) {
-      const heidiField = snapshot.fields.find(
-        (f) => f.id === step.heidiFieldId
-      );
-
-      if (heidiField && heidiField.value) {
-        console.log(
-          `[MAIN] Filling "${step.emrLabel}" with "${heidiField.value.substring(
-            0,
-            50
-          )}${heidiField.value.length > 50 ? "..." : ""}"`
-        );
-        try {
-          await fillFieldAndTab(heidiField.value);
-        } catch (fillError) {
-          console.error(`[MAIN] Error filling field:`, fillError);
-          // Even if fill fails, try to Tab to next field
-          await pressTab();
-          throw fillError;
-        }
-      } else {
-        console.log(
-          `[MAIN] Heidi field "${step.heidiFieldId}" not found or empty, skipping`
-        );
-        // Just press Tab to move to next field
-        await pressTab();
-      }
-    } else {
-      // No match - just Tab to skip this field
-      console.log(
-        `[MAIN] No Heidi match for "${step.emrLabel}", skipping (Tab only)`
-      );
-      await pressTab();
-    }
-
-    // Increment fill index
-    const newFillIndex = fillIndex + 1;
-    updateAgentState({
-      status: newFillIndex >= fillPlan.steps.length ? "synced" : "filling",
-      fillIndex: newFillIndex,
-    });
-
-    console.log(
-      `[MAIN] Fill completed. Progress: ${newFillIndex}/${fillPlan.steps.length}`
-    );
-    console.log("[MAIN] ========================================");
-
-    return { success: true };
+    updateAgentState({ status: "idle" });
+    console.log("[MAIN] Typing completed successfully");
   } catch (error) {
-    console.error("[MAIN] ========================================");
-    console.error("[MAIN] Error in handleFillNext:", error);
-    console.error("[MAIN] ========================================");
     const errorMessage =
-      error instanceof Error ? error.message : "Unknown error";
+      error instanceof Error ? error.message : "Failed to type field";
     updateAgentState({ status: "error", lastError: errorMessage });
-    return { success: false, error: errorMessage };
+    console.error("[MAIN] Error typing field:", errorMessage);
+
+    // Provide helpful error message for accessibility issues
+    if (error instanceof Error && error.message.includes("Accessibility")) {
+      throw error; // Re-throw with helpful message
+    }
+    throw error;
   }
 }
 
 /**
- * Handle refresh Heidi data
+ * Handle refresh Heidi data (capture Heidi and extract fields)
  */
 async function handleRefreshHeidi(): Promise<{
   success: boolean;
@@ -247,7 +177,7 @@ async function handleRefreshHeidi(): Promise<{
   };
   error?: string;
 }> {
-  console.log("[MAIN] handleRefreshHeidi called");
+  console.log("[MAIN] handleRefreshHeidi called (⌥C: capture Heidi)");
 
   try {
     const snapshot = await heidiDataSource.refreshSnapshot();
@@ -257,10 +187,14 @@ async function handleRefreshHeidi(): Promise<{
       "fields"
     );
 
-    // Update state if needed
-    if (agentState.status === "error") {
-      updateAgentState({ status: "idle", lastError: undefined });
-    }
+    // Reset currentIndex to 0 when new snapshot is loaded
+    // Clamp it to valid range in case fields.length changed
+    const newIndex = clampIndex(0, snapshot.fields.length);
+    updateAgentState({
+      status: "idle",
+      currentIndex: newIndex,
+      lastError: undefined,
+    });
 
     return {
       success: true,
@@ -321,29 +255,56 @@ function createWindow() {
 app.whenReady().then(() => {
   createWindow();
 
-  // Register global shortcuts
-  // Cmd+Shift+F: Sync to current EMR field
-  globalShortcut.register("CommandOrControl+Shift+F", async () => {
-    await handleSync();
+  // Register global shortcuts for Heidi field navigation
+  //
+  // New Ctrl+Shift-based shortcut workflow (simplified Heidi-only mode):
+  // - Ctrl+Shift+C: Capture Heidi screen and extract fields
+  // - Ctrl+Shift+W: Move selection up (previous Heidi field)
+  // - Ctrl+Shift+S: Move selection down (next Heidi field)
+  // - Ctrl+Shift+P: Type current Heidi field value into active EMR field
+  //
+  // Note: This replaces the legacy EMR layout analysis + fill-plan workflow.
+  // Users now manually navigate Heidi fields and paste into EMR fields as needed.
+
+  // Ctrl+Shift+C: Capture Heidi and extract fields
+  globalShortcut.register("CommandOrControl+Shift+C", async () => {
+    await handleRefreshHeidi();
   });
 
-  // Cmd+Shift+H: Refresh Heidi data
+  // Ctrl+Shift+W: Move selection up (previous field)
+  globalShortcut.register("CommandOrControl+Shift+W", () => {
+    selectPreviousField();
+  });
+
+  // Ctrl+Shift+S: Move selection down (next field)
+  globalShortcut.register("CommandOrControl+Shift+S", () => {
+    selectNextField();
+  });
+
+  // Ctrl+Shift+P: Type current Heidi field value into active field
+  globalShortcut.register("CommandOrControl+Shift+P", async () => {
+    await pasteCurrentField();
+  });
+
+  // Cmd+Shift+H: Refresh Heidi data (power-user shortcut, kept for compatibility)
   globalShortcut.register("CommandOrControl+Shift+H", async () => {
     await handleRefreshHeidi();
   });
 
-  // Cmd+Shift+K: Fill next field (linear fill)
-  // Note: Using Cmd+Shift+K instead of Alt+Tab to avoid Option key interfering with typing
-  globalShortcut.register("CommandOrControl+Shift+K", async () => {
-    if (agentState.status === "synced" || agentState.status === "filling") {
-      await handleFillNext();
-    }
-  });
-
   // IPC handlers
-  ipcMain.handle("agent:sync", handleSync);
-  ipcMain.handle("agent:fillNext", handleFillNext);
   ipcMain.handle("agent:refreshHeidi", handleRefreshHeidi);
+  ipcMain.handle("agent:selectPreviousField", async () => {
+    selectPreviousField();
+    return { success: true };
+  });
+  ipcMain.handle("agent:selectNextField", async () => {
+    selectNextField();
+    return { success: true };
+  });
+  ipcMain.handle("agent:pasteCurrentField", async () => {
+    await pasteCurrentField();
+    return { success: true };
+  });
   ipcMain.handle("agent:getState", () => {
     return { state: agentState };
   });
