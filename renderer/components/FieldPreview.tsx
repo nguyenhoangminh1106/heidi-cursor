@@ -1,69 +1,143 @@
-import React from 'react';
-import './FieldPreview.css';
+import React from "react";
+import "./FieldPreview.css";
 
-interface FieldPreviewProps {
-  currentField: {
-    id: string;
-    label: string;
-    value: string;
-  } | null;
-  nextField: {
-    id: string;
-    label: string;
-    value: string;
-  } | null;
-  currentIndex: number;
-  totalFields: number;
+interface Field {
+  id: string;
+  label: string;
+  value: string;
 }
 
-function FieldPreview({ currentField, nextField, currentIndex, totalFields }: FieldPreviewProps) {
-  return (
-    <div className="field-preview">
-      <div className="current-field">
-        <div className="field-label">
-          Current Field ({currentIndex + 1} of {totalFields})
+interface FieldPreviewProps {
+  fields: Field[];
+  currentIndex: number;
+  onDemoCardClick?: (
+    fieldId: string,
+    label: string,
+    getValue: (overview: any) => string | null
+  ) => Promise<void>;
+  isLoadingDemo?: boolean;
+  demoError?: string | null;
+}
+
+function FieldPreview({
+  fields,
+  currentIndex,
+  onDemoCardClick,
+  isLoadingDemo = false,
+  demoError = null,
+}: FieldPreviewProps) {
+  if (fields.length === 0) {
+    return (
+      <div className="field-preview">
+        <div className="field-placeholder">
+          <div>No session fields available. Press ⌥C to capture screen.</div>
         </div>
-        {currentField ? (
+        {onDemoCardClick && (
           <>
-            <div className="field-name">{currentField.label}</div>
-            <div className="field-value">
-              {currentField.value.length > 100
-                ? currentField.value.substring(0, 100) + "..."
-                : currentField.value}
+            <div className="field-placeholder-demo-id">
+              <div>Demo Heidi session id:</div>
+              <div>337851254565527952685384877024185083869</div>
             </div>
-            <div style={{ fontSize: '10px', color: '#666', marginTop: '4px' }}>
-              ID: {currentField.id}
+            {demoError && (
+              <div className="demo-heidi-error">
+                Could not load demo session from Heidi: {demoError}
+              </div>
+            )}
+            <div className="demo-grid">
+              <div
+                className={`demo-card ${isLoadingDemo ? "disabled" : ""}`}
+                onClick={() =>
+                  onDemoCardClick(
+                    "heidi-demo-session-name",
+                    "Session name",
+                    (overview) => overview.session_name || null
+                  )
+                }
+              >
+                <div className="demo-card-label">Session name</div>
+                {isLoadingDemo && (
+                  <div className="demo-card-loading">Loading...</div>
+                )}
+              </div>
+              <div
+                className={`demo-card ${isLoadingDemo ? "disabled" : ""}`}
+                onClick={() =>
+                  onDemoCardClick(
+                    "heidi-demo-session-gist",
+                    "Session gist",
+                    (overview) => overview.session_gist || null
+                  )
+                }
+              >
+                <div className="demo-card-label">Session gist</div>
+                {isLoadingDemo && (
+                  <div className="demo-card-loading">Loading...</div>
+                )}
+              </div>
+              <div
+                className={`demo-card ${isLoadingDemo ? "disabled" : ""}`}
+                onClick={() =>
+                  onDemoCardClick(
+                    "heidi-demo-consult-note-heading",
+                    "Consult note heading",
+                    (overview) => overview.consult_note?.heading || null
+                  )
+                }
+              >
+                <div className="demo-card-label">Consult note heading</div>
+                {isLoadingDemo && (
+                  <div className="demo-card-loading">Loading...</div>
+                )}
+              </div>
+              <div
+                className={`demo-card ${isLoadingDemo ? "disabled" : ""}`}
+                onClick={() =>
+                  onDemoCardClick(
+                    "heidi-demo-consult-note-summary",
+                    "Consult note summary",
+                    (overview) => {
+                      const result = overview.consult_note?.result;
+                      if (!result) return null;
+                      return result.length > 300
+                        ? result.substring(0, 300) + "..."
+                        : result;
+                    }
+                  )
+                }
+              >
+                <div className="demo-card-label">Consult note summary</div>
+                {isLoadingDemo && (
+                  <div className="demo-card-loading">Loading...</div>
+                )}
+              </div>
             </div>
           </>
-        ) : (
-          <div className="field-placeholder">
-            {totalFields === 0 
-              ? "No session fields available. Press ⌥C to capture screen."
-              : "No field selected"}
-          </div>
         )}
       </div>
+    );
+  }
 
-      {nextField ? (
-        <div className="next-field">
-          <div className="field-label">Next Field</div>
-          <div className="field-name">{nextField.label}</div>
-          <div className="field-value-preview">
-            {nextField.value.length > 50
-              ? nextField.value.substring(0, 50) + "..."
-              : nextField.value}
+  return (
+    <div className="field-preview">
+      {fields.map((field, index) => {
+        const isCurrent = index === currentIndex;
+        return (
+          <div
+            key={field.id || index}
+            className={`field-item ${isCurrent ? "current" : ""}`}
+          >
+            <div className="field-label">
+              {index + 1}. {field.label}
+            </div>
+            <div className="field-value">
+              {field.value.length > 100
+                ? field.value.substring(0, 100) + "..."
+                : field.value}
+            </div>
+            <div className="field-id">ID: {field.id}</div>
           </div>
-        </div>
-      ) : (
-        <div className="next-field">
-          <div className="field-label">Next Field</div>
-          <div className="field-placeholder">
-            {totalFields === 0 
-              ? "No more fields"
-              : "End of fields"}
-          </div>
-        </div>
-      )}
+        );
+      })}
     </div>
   );
 }

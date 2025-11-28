@@ -13,11 +13,12 @@
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
+  font-family: "Inter", system-ui, sans-serif;
 }
 
 .btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px rgba(33, 18, 23, 0.15);
 }
 
 .btn:active {
@@ -25,44 +26,47 @@
 }
 
 .btn-primary {
-  background: #3b82f6;
-  color: white;
+  background: var(--forest-light);
+  color: var(--text-inverted);
 }
 
 .btn-primary:hover {
-  background: #2563eb;
+  background: var(--bark-light);
 }
 
 .btn-secondary {
-  background: #10b981;
-  color: white;
+  background: var(--sky-light);
+  color: var(--text-primary);
 }
 
 .btn-secondary:hover {
-  background: #059669;
+  background: var(--forest-light);
+  color: var(--text-inverted);
 }
 
 .btn-tertiary {
-  background: #ef4444;
-  color: white;
+  background: var(--sand-150);
+  color: var(--text-primary);
+  border: 1px solid var(--text-secondary);
 }
 
 .btn-tertiary:hover {
-  background: #dc2626;
+  background: var(--sand-100);
 }
 
 .btn-sync {
-  background: #8b5cf6;
-  color: white;
+  background: var(--bark-light);
+  color: var(--text-inverted);
 }
 
 .btn-sync:hover:not(:disabled) {
-  background: #7c3aed;
+  background: var(--text-secondary);
 }
 
 .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+  background: var(--text-tertiary);
 }
 
 .btn:disabled:hover {

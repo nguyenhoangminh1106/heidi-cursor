@@ -16,11 +16,67 @@ export interface ElectronAPI {
     listWindows: () => Promise<{ windows: LinkedWindow[] }>;
     setLinkedEmrWindow: (window: LinkedWindow) => Promise<{ success: boolean }>;
     getLinkedEmrWindow: () => Promise<{ window?: LinkedWindow }>;
+    addSessionFields: (
+      fields: any[]
+    ) => Promise<{ success: boolean; error?: string }>;
   };
   ui: {
     iconClicked: () => Promise<void>;
   };
   heidi: {
+    // Patient Profiles
+    createPatientProfile: (
+      profile: any
+    ) => Promise<{ ok: boolean; data?: any; error?: string }>;
+    getPatientProfile: (
+      id: string
+    ) => Promise<{ ok: boolean; data?: any; error?: string }>;
+    updatePatientProfile: (
+      id: string,
+      profile: any
+    ) => Promise<{ ok: boolean; data?: any; error?: string }>;
+    createPatientProfileFromEmr: () => Promise<{
+      ok: boolean;
+      data?: any;
+      error?: string;
+    }>;
+    // Sessions
+    createSession: (
+      session: any
+    ) => Promise<{ ok: boolean; data?: any; error?: string }>;
+    getSession: (
+      sessionId: string
+    ) => Promise<{ ok: boolean; data?: any; error?: string }>;
+    getSessionOverview: (
+      sessionId: string
+    ) => Promise<{ ok: boolean; data?: any; error?: string }>;
+    getSessionContext: (
+      sessionId: string
+    ) => Promise<{ ok: boolean; data?: any; error?: string }>;
+    getSessionCoding: (
+      sessionId: string
+    ) => Promise<{ ok: boolean; data?: any; error?: string }>;
+    // Transcription
+    getSessionTranscription: (
+      sessionId: string
+    ) => Promise<{ ok: boolean; data?: any; error?: string }>;
+    // Consult Notes
+    getSessionConsultNotes: (
+      sessionId: string
+    ) => Promise<{ ok: boolean; data?: any; error?: string }>;
+    // Documents
+    getSessionDocuments: (
+      sessionId: string
+    ) => Promise<{ ok: boolean; data?: any; error?: string }>;
+    createDocument: (
+      sessionId: string,
+      documentInput: any
+    ) => Promise<{ ok: boolean; data?: any; error?: string }>;
+    // Ask Heidi
+    askHeidi: (
+      request: any
+    ) => Promise<{ ok: boolean; data?: any; error?: string }>;
+    // Legacy alias
     fetchSession: (
       sessionId: string
     ) => Promise<{ ok: boolean; data?: any; error?: string }>;
@@ -42,11 +98,47 @@ const electronAPI: ElectronAPI = {
     setLinkedEmrWindow: (window: LinkedWindow) =>
       ipcRenderer.invoke("agent:setLinkedEmrWindow", window),
     getLinkedEmrWindow: () => ipcRenderer.invoke("agent:getLinkedEmrWindow"),
+    addSessionFields: (fields: any[]) =>
+      ipcRenderer.invoke("agent:addSessionFields", fields),
   },
   ui: {
     iconClicked: () => ipcRenderer.invoke("ui:iconClicked"),
   },
   heidi: {
+    // Patient Profiles
+    createPatientProfile: (profile: any) =>
+      ipcRenderer.invoke("heidi:createPatientProfile", profile),
+    getPatientProfile: (id: string) =>
+      ipcRenderer.invoke("heidi:getPatientProfile", id),
+    updatePatientProfile: (id: string, profile: any) =>
+      ipcRenderer.invoke("heidi:updatePatientProfile", id, profile),
+    createPatientProfileFromEmr: () =>
+      ipcRenderer.invoke("heidi:createPatientProfileFromEmr"),
+    // Sessions
+    createSession: (session: any) =>
+      ipcRenderer.invoke("heidi:createSession", session),
+    getSession: (sessionId: string) =>
+      ipcRenderer.invoke("heidi:getSession", sessionId),
+    getSessionOverview: (sessionId: string) =>
+      ipcRenderer.invoke("heidi:getSessionOverview", sessionId),
+    getSessionContext: (sessionId: string) =>
+      ipcRenderer.invoke("heidi:getSessionContext", sessionId),
+    getSessionCoding: (sessionId: string) =>
+      ipcRenderer.invoke("heidi:getSessionCoding", sessionId),
+    // Transcription
+    getSessionTranscription: (sessionId: string) =>
+      ipcRenderer.invoke("heidi:getSessionTranscription", sessionId),
+    // Consult Notes
+    getSessionConsultNotes: (sessionId: string) =>
+      ipcRenderer.invoke("heidi:getSessionConsultNotes", sessionId),
+    // Documents
+    getSessionDocuments: (sessionId: string) =>
+      ipcRenderer.invoke("heidi:getSessionDocuments", sessionId),
+    createDocument: (sessionId: string, documentInput: any) =>
+      ipcRenderer.invoke("heidi:createDocument", sessionId, documentInput),
+    // Ask Heidi
+    askHeidi: (request: any) => ipcRenderer.invoke("heidi:askHeidi", request),
+    // Legacy alias
     fetchSession: (sessionId: string) =>
       ipcRenderer.invoke("heidi:fetchSession", sessionId),
   },

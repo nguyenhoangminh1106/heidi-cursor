@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { LinkedWindow } from "../../src/types/agent";
 import "./IconApp.css";
+import heidiIcon from "../assets/heidi-icon.svg";
 
 function IconApp() {
   const [linkedWindow, setLinkedWindow] = useState<LinkedWindow | undefined>();
@@ -30,11 +31,8 @@ function IconApp() {
       <div className="icon-drag-region" />
       <div className="icon-clickable" onClick={handleClick}>
         <div className="icon-circle">
-          {linkedWindow ? (
-            <div className="icon-badge">✓</div>
-          ) : (
-            <div className="icon-placeholder">H</div>
-          )}
+          <img src={heidiIcon} alt="Heidi" className="icon-logo" />
+          {linkedWindow && <div className="icon-badge">✓</div>}
         </div>
       </div>
     </div>

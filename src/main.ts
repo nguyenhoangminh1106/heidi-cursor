@@ -12,7 +12,22 @@ import * as path from "path";
 import { promisify } from "util";
 import { pressCommandV } from "./automation/keyboardFiller";
 import { validateHeidiConfig } from "./config/heidiConfig";
-import { fetchSession } from "./services/heidiApiClient";
+import { buildHeidiPatientProfileFromEmrSnapshot } from "./services/emrHeidiProfileMapper";
+import {
+  askHeidi,
+  createDocument,
+  createPatientProfile,
+  createSession,
+  getPatientProfile,
+  getSession,
+  getSessionCoding,
+  getSessionConsultNotes,
+  getSessionContext,
+  getSessionDocuments,
+  getSessionOverview,
+  getSessionTranscription,
+  updatePatientProfile,
+} from "./services/heidiApiClient";
 import { captureFullScreen } from "./services/screenshot";
 import {
   extractSessionFieldsFromImage,
@@ -207,8 +222,25 @@ async function pasteCurrentField(): Promise<void> {
       }
     }
 
-    updateAgentState({ status: "idle" });
-    console.log("[MAIN] Typing (via paste) completed successfully");
+    // Move to next field after successful paste
+    const nextIndex = clampIndex(currentIndex + 1, fields.length);
+
+    updateAgentState({
+      status: "idle",
+      currentIndex: nextIndex,
+    });
+
+    if (nextIndex > currentIndex) {
+      console.log(
+        `[MAIN] Typing (via paste) completed successfully. Moved to next field: ${
+          nextIndex + 1
+        }/${fields.length}`
+      );
+    } else {
+      console.log(
+        "[MAIN] Typing (via paste) completed successfully. No more fields."
+      );
+    }
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : "Failed to type field";
@@ -298,6 +330,47 @@ function clearSession(): void {
     lastError: undefined,
   });
   console.log("[MAIN] Session cleared");
+}
+
+/**
+ * Add session fields to the current session
+ */
+function addSessionFields(newFields: SessionField[]): void {
+  console.log(`[MAIN] addSessionFields called with ${newFields.length} fields`);
+  console.log(`[MAIN] New fields:`, JSON.stringify(newFields, null, 2));
+  console.log(
+    `[MAIN] Current sessionFields count:`,
+    agentState.sessionFields.length
+  );
+
+  // Ensure sessionId is set
+  if (!agentState.sessionId) {
+    agentState.sessionId = `session_${Date.now()}`;
+  }
+
+  // Merge new fields with existing ones
+  const mergedFields = mergeSessionFields(agentState.sessionFields, newFields);
+  console.log(`[MAIN] After merge: ${mergedFields.length} total fields`);
+
+  // Update currentIndex to the first newly added field
+  const firstNewFieldIndex = agentState.sessionFields.length;
+  const newIndex =
+    firstNewFieldIndex < mergedFields.length
+      ? firstNewFieldIndex
+      : clampIndex(agentState.currentIndex, mergedFields.length);
+
+  console.log(
+    `[MAIN] Updating state with ${mergedFields.length} fields, currentIndex: ${newIndex}`
+  );
+  updateAgentState({
+    sessionFields: mergedFields,
+    currentIndex: newIndex,
+    lastError: undefined,
+  });
+
+  console.log(
+    `[MAIN] Added ${newFields.length} fields: ${mergedFields.length} total fields`
+  );
 }
 
 /**
@@ -1531,7 +1604,7 @@ function createPairingWindow() {
     y: y,
     alwaysOnTop: true,
     resizable: false,
-    frame: true,
+    frame: false,
     modal: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -1547,6 +1620,14 @@ function createPairingWindow() {
     const filePath = path.join(__dirname, "../dist/renderer/index.html");
     pairingWindow.loadURL(`file://${filePath}?view=pairing`);
   }
+
+  // For the pairing (secondary) view only: hide the window when it loses focus
+  // so clicking anywhere outside will close it.
+  pairingWindow.on("blur", () => {
+    if (pairingWindow && pairingWindow.isVisible()) {
+      pairingWindow.hide();
+    }
+  });
 
   pairingWindow.on("closed", () => {
     pairingWindow = null;
@@ -1886,11 +1967,381 @@ app.whenReady().then(async () => {
   ipcMain.handle("agent:getState", () => {
     return { state: agentState };
   });
+  ipcMain.handle(
+    "agent:addSessionFields",
+    async (_, fields: SessionField[]) => {
+      try {
+        addSessionFields(fields);
+        return { success: true };
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : "Failed to add session fields";
+        console.error("[MAIN] Error adding session fields:", errorMessage);
+        return { success: false, error: errorMessage };
+      }
+    }
+  );
 
+  // ============================================================================
   // Heidi API IPC handlers
+  // Documentation: https://www.heidihealth.com/developers/heidi-api/
+  // ============================================================================
+
+  // Patient Profiles
+  ipcMain.handle("heidi:createPatientProfile", async (_, profile) => {
+    try {
+      if (!profile || typeof profile !== "object") {
+        return {
+          ok: false,
+          error: "Invalid profile data",
+        };
+      }
+      const result = await createPatientProfile(profile);
+      return result;
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      console.error("[MAIN] Error in heidi:createPatientProfile:", error);
+      return {
+        ok: false,
+        error: `Failed to create patient profile: ${errorMessage}`,
+      };
+    }
+  });
+
+  ipcMain.handle("heidi:getPatientProfile", async (_, id: string) => {
+    try {
+      if (!id || typeof id !== "string") {
+        return {
+          ok: false,
+          error: "Invalid patient profile ID",
+        };
+      }
+      const result = await getPatientProfile(id);
+      return result;
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      console.error("[MAIN] Error in heidi:getPatientProfile:", error);
+      return {
+        ok: false,
+        error: `Failed to get patient profile: ${errorMessage}`,
+      };
+    }
+  });
+
+  ipcMain.handle(
+    "heidi:updatePatientProfile",
+    async (_, id: string, profile) => {
+      try {
+        if (!id || typeof id !== "string") {
+          return {
+            ok: false,
+            error: "Invalid patient profile ID",
+          };
+        }
+        if (!profile || typeof profile !== "object") {
+          return {
+            ok: false,
+            error: "Invalid profile data",
+          };
+        }
+        const result = await updatePatientProfile(id, profile);
+        return result;
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+        console.error("[MAIN] Error in heidi:updatePatientProfile:", error);
+        return {
+          ok: false,
+          error: `Failed to update patient profile: ${errorMessage}`,
+        };
+      }
+    }
+  );
+
+  ipcMain.handle("heidi:createPatientProfileFromEmr", async () => {
+    try {
+      console.log("[MAIN] Creating patient profile from EMR snapshot...");
+
+      // Capture EMR screen
+      const imageBuffer = await captureFullScreen();
+      console.log("[MAIN] Captured EMR screen");
+
+      // Extract fields from screenshot
+      const fields = await extractSessionFieldsFromImage(imageBuffer);
+      console.log(`[MAIN] Extracted ${fields.length} fields from EMR`);
+
+      // Map to Heidi patient profile format
+      const profileInput = buildHeidiPatientProfileFromEmrSnapshot(fields);
+      console.log("[MAIN] Mapped to Heidi patient profile:", profileInput);
+
+      // Create patient profile via Heidi API
+      const result = await createPatientProfile(profileInput);
+
+      if (result.ok) {
+        console.log("[MAIN] Patient profile created successfully");
+      } else {
+        console.error("[MAIN] Failed to create patient profile:", result.error);
+      }
+
+      return result;
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      console.error(
+        "[MAIN] Error in heidi:createPatientProfileFromEmr:",
+        error
+      );
+      return {
+        ok: false,
+        error: `Failed to create patient profile: ${errorMessage}`,
+      };
+    }
+  });
+
+  // Sessions
+  ipcMain.handle("heidi:createSession", async (_, session) => {
+    try {
+      if (!session || typeof session !== "object") {
+        return {
+          ok: false,
+          error: "Invalid session data",
+        };
+      }
+      const result = await createSession(session);
+      return result;
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      console.error("[MAIN] Error in heidi:createSession:", error);
+      return {
+        ok: false,
+        error: `Failed to create session: ${errorMessage}`,
+      };
+    }
+  });
+
+  ipcMain.handle("heidi:getSession", async (_, sessionId: string) => {
+    try {
+      if (!sessionId || typeof sessionId !== "string") {
+        return {
+          ok: false,
+          error: "Invalid session ID",
+        };
+      }
+      const result = await getSession(sessionId);
+      return result;
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      console.error("[MAIN] Error in heidi:getSession:", error);
+      return {
+        ok: false,
+        error: `Failed to get session: ${errorMessage}`,
+      };
+    }
+  });
+
+  ipcMain.handle("heidi:getSessionOverview", async (_, sessionId: string) => {
+    try {
+      if (!sessionId || typeof sessionId !== "string") {
+        return {
+          ok: false,
+          error: "Invalid session ID",
+        };
+      }
+      const result = await getSessionOverview(sessionId);
+      return result;
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      console.error("[MAIN] Error in heidi:getSessionOverview:", error);
+      return {
+        ok: false,
+        error: `Failed to get session overview: ${errorMessage}`,
+      };
+    }
+  });
+
+  ipcMain.handle("heidi:getSessionContext", async (_, sessionId: string) => {
+    try {
+      if (!sessionId || typeof sessionId !== "string") {
+        return {
+          ok: false,
+          error: "Invalid session ID",
+        };
+      }
+      const result = await getSessionContext(sessionId);
+      return result;
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      console.error("[MAIN] Error in heidi:getSessionContext:", error);
+      return {
+        ok: false,
+        error: `Failed to get session context: ${errorMessage}`,
+      };
+    }
+  });
+
+  ipcMain.handle("heidi:getSessionCoding", async (_, sessionId: string) => {
+    try {
+      if (!sessionId || typeof sessionId !== "string") {
+        return {
+          ok: false,
+          error: "Invalid session ID",
+        };
+      }
+      const result = await getSessionCoding(sessionId);
+      return result;
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      console.error("[MAIN] Error in heidi:getSessionCoding:", error);
+      return {
+        ok: false,
+        error: `Failed to get session coding: ${errorMessage}`,
+      };
+    }
+  });
+
+  // Transcription
+  ipcMain.handle(
+    "heidi:getSessionTranscription",
+    async (_, sessionId: string) => {
+      try {
+        if (!sessionId || typeof sessionId !== "string") {
+          return {
+            ok: false,
+            error: "Invalid session ID",
+          };
+        }
+        const result = await getSessionTranscription(sessionId);
+        return result;
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+        console.error("[MAIN] Error in heidi:getSessionTranscription:", error);
+        return {
+          ok: false,
+          error: `Failed to get session transcription: ${errorMessage}`,
+        };
+      }
+    }
+  );
+
+  // Consult Notes
+  ipcMain.handle(
+    "heidi:getSessionConsultNotes",
+    async (_, sessionId: string) => {
+      try {
+        if (!sessionId || typeof sessionId !== "string") {
+          return {
+            ok: false,
+            error: "Invalid session ID",
+          };
+        }
+        const result = await getSessionConsultNotes(sessionId);
+        return result;
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+        console.error("[MAIN] Error in heidi:getSessionConsultNotes:", error);
+        return {
+          ok: false,
+          error: `Failed to get session consult notes: ${errorMessage}`,
+        };
+      }
+    }
+  );
+
+  // Documents
+  ipcMain.handle("heidi:getSessionDocuments", async (_, sessionId: string) => {
+    try {
+      if (!sessionId || typeof sessionId !== "string") {
+        return {
+          ok: false,
+          error: "Invalid session ID",
+        };
+      }
+      const result = await getSessionDocuments(sessionId);
+      return result;
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      console.error("[MAIN] Error in heidi:getSessionDocuments:", error);
+      return {
+        ok: false,
+        error: `Failed to get session documents: ${errorMessage}`,
+      };
+    }
+  });
+
+  ipcMain.handle(
+    "heidi:createDocument",
+    async (_, sessionId: string, documentInput) => {
+      try {
+        if (!sessionId || typeof sessionId !== "string") {
+          return {
+            ok: false,
+            error: "Invalid session ID",
+          };
+        }
+        if (!documentInput || typeof documentInput !== "object") {
+          return {
+            ok: false,
+            error: "Invalid document input",
+          };
+        }
+        const result = await createDocument(sessionId, documentInput);
+        return result;
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+        console.error("[MAIN] Error in heidi:createDocument:", error);
+        return {
+          ok: false,
+          error: `Failed to create document: ${errorMessage}`,
+        };
+      }
+    }
+  );
+
+  // Ask Heidi
+  ipcMain.handle("heidi:askHeidi", async (_, request) => {
+    try {
+      if (!request || typeof request !== "object") {
+        return {
+          ok: false,
+          error: "Invalid request data",
+        };
+      }
+      const result = await askHeidi(request);
+      return result;
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      console.error("[MAIN] Error in heidi:askHeidi:", error);
+      return {
+        ok: false,
+        error: `Failed to ask Heidi: ${errorMessage}`,
+      };
+    }
+  });
+
+  // Legacy alias for backward compatibility
   ipcMain.handle("heidi:fetchSession", async (_, sessionId: string) => {
     try {
-      const result = await fetchSession(sessionId);
+      if (!sessionId || typeof sessionId !== "string") {
+        return {
+          ok: false,
+          error: "Invalid session ID",
+        };
+      }
+      const result = await getSessionDocuments(sessionId);
       return result;
     } catch (error) {
       const errorMessage =
