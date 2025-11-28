@@ -44,10 +44,17 @@ export interface SessionField {
   source?: "heidi" | "emr" | "other";
 }
 
+export interface LinkedWindow {
+  appName: string;
+  windowTitle: string;
+  index?: number;
+}
+
 export interface AgentState {
   status: AgentStatus;
   sessionId?: string; // Unique identifier for the current session
   sessionFields: SessionField[]; // Generic key/value pairs captured in this session
   currentIndex: number; // Index into sessionFields (selected key)
   lastError?: string;
+  linkedEmrWindow?: LinkedWindow; // Linked EMR window for scoping agent operations
 }

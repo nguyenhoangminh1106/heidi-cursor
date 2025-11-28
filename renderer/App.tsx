@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { AgentState } from "../src/types/agent";
+import { AgentState, LinkedWindow } from "../src/types/agent";
 import "./App.css";
 import Controls from "./components/Controls";
 import FieldPreview from "./components/FieldPreview";
@@ -14,6 +14,9 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [linkedEmrWindow, setLinkedEmrWindow] = useState<
+    LinkedWindow | undefined
+  >();
 
   useEffect(() => {
     // Wait for electronAPI to be available
@@ -38,6 +41,9 @@ function App() {
     window.electronAPI.agent.onStateUpdated((update) => {
       if (update && update.state) {
         setState(update.state);
+        if (update.state.linkedEmrWindow !== undefined) {
+          setLinkedEmrWindow(update.state.linkedEmrWindow);
+        }
         if (update.state.lastError) {
           setError(update.state.lastError);
           setTimeout(() => setError(null), 5000);
@@ -46,6 +52,16 @@ function App() {
         }
       }
     });
+
+    // Get initial linked window status
+    window.electronAPI.agent
+      .getLinkedEmrWindow()
+      .then((result) => {
+        setLinkedEmrWindow(result.window);
+      })
+      .catch((err) => {
+        console.error("Error getting linked window:", err);
+      });
 
     return () => {
       // Cleanup if needed
@@ -159,6 +175,19 @@ function App() {
               Security → Accessibility
             </div>
           )}
+        </div>
+      )}
+
+      {linkedEmrWindow ? (
+        <div className="emr-link-status">
+          ✓ Linked to: <strong>{linkedEmrWindow.appName}</strong> –{" "}
+          {linkedEmrWindow.windowTitle.length > 40
+            ? linkedEmrWindow.windowTitle.substring(0, 40) + "..."
+            : linkedEmrWindow.windowTitle}
+        </div>
+      ) : (
+        <div className="emr-link-status emr-link-status-warning">
+          ⚠️ Not linked to EMR window. Click the floating icon to connect.
         </div>
       )}
 

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { AgentState } from "./types/agent";
+import { AgentState, LinkedWindow } from "./types/agent";
 
 export interface ElectronAPI {
   agent: {
@@ -13,6 +13,12 @@ export interface ElectronAPI {
     clearSession: () => Promise<{ success: boolean }>;
     getState: () => Promise<{ state: AgentState }>;
     onStateUpdated: (callback: (update: { state: AgentState }) => void) => void;
+    listWindows: () => Promise<{ windows: LinkedWindow[] }>;
+    setLinkedEmrWindow: (window: LinkedWindow) => Promise<{ success: boolean }>;
+    getLinkedEmrWindow: () => Promise<{ window?: LinkedWindow }>;
+  };
+  ui: {
+    iconClicked: () => Promise<void>;
   };
 }
 
@@ -27,6 +33,13 @@ const electronAPI: ElectronAPI = {
     onStateUpdated: (callback) => {
       ipcRenderer.on("agent:stateUpdated", (_, update) => callback(update));
     },
+    listWindows: () => ipcRenderer.invoke("agent:listWindows"),
+    setLinkedEmrWindow: (window: LinkedWindow) =>
+      ipcRenderer.invoke("agent:setLinkedEmrWindow", window),
+    getLinkedEmrWindow: () => ipcRenderer.invoke("agent:getLinkedEmrWindow"),
+  },
+  ui: {
+    iconClicked: () => ipcRenderer.invoke("ui:iconClicked"),
   },
 };
 

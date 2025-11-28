@@ -71,6 +71,23 @@
   font-style: italic;
 }
 
+.emr-link-status {
+  padding: 10px 12px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  color: #166534;
+  font-size: 12px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.emr-link-status-warning {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
 .detected-field-info {
   padding: 8px 12px;
   background: #f0fdf4;

@@ -1,0 +1,72 @@
+.icon-app {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  position: relative;
+}
+
+.icon-drag-region {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  -webkit-app-region: drag;
+  pointer-events: all;
+}
+
+.icon-clickable {
+  position: relative;
+  z-index: 1;
+  -webkit-app-region: no-drag;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.icon-clickable:hover {
+  transform: scale(1.1);
+}
+
+.icon-clickable:active {
+  transform: scale(0.95);
+}
+
+.icon-circle {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  position: relative;
+}
+
+.icon-placeholder {
+  color: white;
+  font-size: 24px;
+  font-weight: bold;
+  user-select: none;
+}
+
+.icon-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #10b981;
+  color: white;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  border: 2px solid white;
+}
+
