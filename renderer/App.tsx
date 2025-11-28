@@ -314,12 +314,18 @@ function App() {
           <div>⌥S: Move down</div>
           <div>⌥V: Type field</div>
           <div>⌥X: Clear</div>
+          <div>⌥D: Disconnect EMR & close</div>
         </div>
         <button
-          className="btn-debug"
+          className={`btn-debug ${
+            sessionFields.length === 0 ? "disabled" : ""
+          }`}
           onClick={() => {
-            setShowDebugPanel(!showDebugPanel);
+            if (sessionFields.length > 0) {
+              setShowDebugPanel(!showDebugPanel);
+            }
           }}
+          disabled={sessionFields.length === 0}
         >
           {showDebugPanel ? "Hide" : "Show"} Debug
         </button>

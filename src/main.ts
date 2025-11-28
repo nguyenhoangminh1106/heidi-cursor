@@ -1266,6 +1266,89 @@ async function switchBetweenLinkedWindows(): Promise<void> {
 }
 
 /**
+ * Disconnect from linked EMR window and close the main panel
+ */
+async function disconnectEmrAndClosePanel(): Promise<void> {
+  console.log("[MAIN] Disconnecting from EMR and closing panel");
+
+  const panelWidth = 400;
+
+  // Restore windows that were pushed (must do this before clearing linkedEmrWindow)
+  if (hasPushedWindow && linkedEmrWindow) {
+    if (savedHeidiBounds || savedEmrBounds) {
+      try {
+        // Restore Heidi window if it was pushed
+        if (savedHeidiBounds) {
+          await restoreFrontmostWindow(savedHeidiBounds);
+        }
+        // Restore EMR window if it was pushed
+        if (savedEmrBounds) {
+          await restoreFrontmostWindow(savedEmrBounds);
+        }
+        // Also ensure both are full width (in case restore didn't work perfectly)
+        await restoreLinkedWindows();
+        console.log("[MAIN] Restored linked windows to full width");
+      } catch (error) {
+        console.error(
+          "[MAIN] Error restoring linked windows on disconnect:",
+          error
+        );
+        // Fallback: try to restore both to full width
+        try {
+          await restoreLinkedWindows();
+        } catch (fallbackError) {
+          console.error("[MAIN] Error in fallback restore:", fallbackError);
+        }
+      }
+    }
+
+    // Clear saved bounds
+    savedWindowBounds = null;
+    savedHeidiBounds = null;
+    savedEmrBounds = null;
+    hasPushedWindow = false;
+  }
+
+  // Close the panel if it's currently visible
+  if (isPanelVisible) {
+    await slideOut(panelWidth);
+
+    // Hide pairing window if visible
+    if (pairingWindow && pairingWindow.isVisible()) {
+      pairingWindow.hide();
+    }
+
+    // Hide main window completely after sliding out
+    mainWindow?.hide();
+
+    // Show floating icon after panel is hidden
+    if (floatingIconWindow) {
+      positionIconBottomRight();
+      if (
+        process.platform === "darwin" &&
+        typeof floatingIconWindow.showInactive === "function"
+      ) {
+        floatingIconWindow.showInactive();
+      } else {
+        floatingIconWindow.show();
+      }
+    }
+
+    // Update panel visibility state
+    isPanelVisible = false;
+
+    console.log("[MAIN] Closed main panel");
+  }
+
+  // Clear the linked EMR window (do this after restoring windows)
+  if (linkedEmrWindow) {
+    linkedEmrWindow = null;
+    updateAgentState({ linkedEmrWindow: undefined });
+    console.log("[MAIN] Cleared linked EMR window");
+  }
+}
+
+/**
  * Check if main panel should be allowed to open (only when linked to EMR)
  */
 async function canOpenMainPanel(): Promise<boolean> {
@@ -2546,6 +2629,11 @@ app.whenReady().then(async () => {
   // Option+Tab: Switch between Heidi and linked EMR window
   globalShortcut.register("Alt+Tab", async () => {
     await switchBetweenLinkedWindows();
+  });
+
+  // Alt+D: Disconnect from EMR and close panel
+  globalShortcut.register("Alt+D", async () => {
+    await disconnectEmrAndClosePanel();
   });
 
   app.on("activate", () => {

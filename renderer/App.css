@@ -147,8 +147,14 @@
   font-family: "Inter", system-ui, sans-serif;
 }
 
-.btn-debug:hover {
+.btn-debug:hover:not(.disabled):not(:disabled) {
   background: var(--text-secondary);
+}
+
+.btn-debug.disabled,
+.btn-debug:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .debug-panel {
