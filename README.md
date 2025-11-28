@@ -21,6 +21,26 @@ A floating Electron desktop application that automates form filling using RPA (R
   - Accessibility permissions (System Settings → Privacy & Security → Accessibility)
   - Screen Recording permissions (System Settings → Privacy & Security → Screen Recording)
 
+## Environment Variables
+
+The app supports the following environment variables (set via `.env` file or system environment):
+
+### Heidi API (Optional)
+
+To enable Heidi API integration for fetching session data:
+
+- `HEIDI_API_KEY`: Your Heidi API shared key (required for Heidi API features)
+- `HEIDI_API_BASE_URL`: Heidi API base URL (optional, defaults to `https://api.heidihealth.com`)
+
+Example `.env` file:
+
+```bash
+HEIDI_API_KEY=your_api_key_here
+HEIDI_API_BASE_URL=https://api.heidihealth.com
+```
+
+**Note**: Never commit your `.env` file or API keys to version control. The app will log a warning if `HEIDI_API_KEY` is not set, but will continue to function without it (Heidi API features will be disabled).
+
 ## Installation
 
 1. Install dependencies:

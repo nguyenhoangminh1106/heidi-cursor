@@ -20,6 +20,11 @@ export interface ElectronAPI {
   ui: {
     iconClicked: () => Promise<void>;
   };
+  heidi: {
+    fetchSession: (
+      sessionId: string
+    ) => Promise<{ ok: boolean; data?: any; error?: string }>;
+  };
 }
 
 const electronAPI: ElectronAPI = {
@@ -40,6 +45,10 @@ const electronAPI: ElectronAPI = {
   },
   ui: {
     iconClicked: () => ipcRenderer.invoke("ui:iconClicked"),
+  },
+  heidi: {
+    fetchSession: (sessionId: string) =>
+      ipcRenderer.invoke("heidi:fetchSession", sessionId),
   },
 };
 

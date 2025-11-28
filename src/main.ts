@@ -11,6 +11,8 @@ import {
 import * as path from "path";
 import { promisify } from "util";
 import { pressCommandV } from "./automation/keyboardFiller";
+import { validateHeidiConfig } from "./config/heidiConfig";
+import { fetchSession } from "./services/heidiApiClient";
 import { captureFullScreen } from "./services/screenshot";
 import {
   extractSessionFieldsFromImage,
@@ -1375,6 +1377,9 @@ async function updateFloatingIconVisibility(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  // Validate Heidi API configuration
+  validateHeidiConfig();
+
   // Register IPC handlers FIRST before creating windows
   // (windows may try to call IPC handlers immediately on load)
   ipcMain.handle("agent:captureAndEnrich", handleCaptureAndEnrich);
@@ -1396,6 +1401,22 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("agent:getState", () => {
     return { state: agentState };
+  });
+
+  // Heidi API IPC handlers
+  ipcMain.handle("heidi:fetchSession", async (_, sessionId: string) => {
+    try {
+      const result = await fetchSession(sessionId);
+      return result;
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      console.error("[MAIN] Error in heidi:fetchSession handler:", error);
+      return {
+        ok: false,
+        error: `Failed to fetch session: ${errorMessage}`,
+      };
+    }
   });
 
   // Window management IPC handlers
