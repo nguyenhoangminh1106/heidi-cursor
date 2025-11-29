@@ -5,7 +5,7 @@ It captures the EMR screen, extracts structured fields with OCR + AI, and lets y
 
 ## Demo
 
-<iframe width="560" height="315" src="https://www.loom.com/embed/7afb75ed4c4c4c2ebe5e8fbc8bddfa7a" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe>
+[Watch a demo video](https://www.loom.com/share/7afb75ed4c4c4c2ebe5e8fbc8bddfa7a)
 
 ## Features
 
