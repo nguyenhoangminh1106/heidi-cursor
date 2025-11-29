@@ -3,6 +3,10 @@
 A floating Electron desktop application that pairs a Heidi session with a live EMR window.
 It captures the EMR screen, extracts structured fields with OCR + AI, and lets you paste them back using global keyboard shortcuts.
 
+## Demo
+
+Watch a demo video: https://www.loom.com/share/7afb75ed4c4c4c2ebe5e8fbc8bddfa7a
+
 ## Features
 
 - **Floating Heidi icon & panel**: Always-on-top floating icon that opens a branded Heidi side panel on the right.
