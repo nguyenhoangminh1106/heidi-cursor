@@ -1,4 +1,4 @@
-# Heidi Cursor – Floating EMR Helper Agent
+# Heidi – Floating EMR Helper Agent
 
 A floating Electron desktop application that pairs a Heidi session with a live EMR window.
 It captures the EMR screen, extracts structured fields with OCR + AI, and lets you paste them back using global keyboard shortcuts.
